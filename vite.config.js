@@ -53,5 +53,10 @@ function csp() {
 export default defineConfig({
   base: './',                 // works under a GitHub Pages sub-path
   plugins: [react(), gazetteer(), csp()],
+  // The workspace and the analysis are loaded lazily. Pre-bundle their libraries at dev start-up,
+  // or Vite finds them on the first import(), re-optimises, and that import fails.
+  optimizeDeps: {
+    include: ['maplibre-gl', 'd3', 'three', 'three/examples/jsm/controls/OrbitControls.js', '@turf/turf', 'topojson-client', 'jszip', 'animejs/lib/anime.es.js']
+  },
   build: { chunkSizeWarningLimit: 2500 }
 });

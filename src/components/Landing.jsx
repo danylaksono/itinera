@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import anime from 'animejs/lib/anime.es.js';
-import { useStore, setState } from '../store.js';
+import { useStore, setState, loadActions } from '../store.js';
 import { INKS_D, INKS_L, cssv } from '../lib/colors.js';
 import { reducedMotion } from '../hooks.js';
 
@@ -9,8 +9,9 @@ export const Wordmark = ({ size = 22, ...p }) => (
 );
 
 const exploreSample = async () => {
-  setState({ busy: { step: 'Making a sample year', sub: 'Two phones and a running watch' } });
-  (await import('../actions.js')).loadSample();
+  setState({ busy: { step: 'Making a sample year', sub: 'Two phones and a running watch' }, landErr: '' });
+  const a = await loadActions().catch(() => null);
+  if (a) a.loadSample();
 };
 
 export default function Landing({ onPick, over }) {

@@ -32,6 +32,20 @@ export function setState(patch) {
 export function subscribe(f) { subs.add(f); return () => subs.delete(f); }
 export const useStore = sel => useSyncExternalStore(subscribe, () => sel(state));
 
+/* The analysis code (actions.js and the libraries it needs) loads on demand. If that load fails
+   (a new deploy replaced the chunks, the network dropped, or the dev server re-optimised),
+   say so and clear the overlay, so the page never waits forever. */
+export async function loadActions() {
+  try { return await import('./actions.js'); }
+  catch (e) {
+    console.error(e);
+    const msg = 'Itinera could not load its analysis code. Reload the page and try again.';
+    setState(s => ({ busy: null, ...(s.screen === 'landing' ? { landErr: msg } : {}) }));
+    if (state.screen !== 'landing') toast(msg, 9000);
+    throw e;
+  }
+}
+
 let toastId = 0, toastTimer = null;
 export function toast(msg, ms = 4000) {
   const id = ++toastId;

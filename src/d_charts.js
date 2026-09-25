@@ -35,6 +35,7 @@ function renderKPIs() {
     el.innerHTML = KPI_DEF.map(d => `<div class="kpi" data-k="${d.k}" title="${d.sl}"><div class="v"><span class="n">0</span><small>${d.unit}</small></div><div class="l">${d.label}</div><svg preserveAspectRatio="none"></svg></div>`).join('');
   }
   const days = rangeToDays();
+  const multi = visibleSources().length > 1 ? ' Where devices overlap in time, only the device that covers the most days is counted.' : '';
   const m0 = days ? monthOfDay(days[0]) : null, m1 = days ? monthOfDay(days[1]) : null;
   for (const d of KPI_DEF) {
     const box = el.querySelector(`[data-k="${d.k}"]`);
@@ -50,6 +51,7 @@ function renderKPIs() {
       nEl._o = o;
     } else nEl.textContent = d.fmt(target);
     kpiShown[d.k] = target;
+    box.title = d.sl + multi;
     if (d.k === 'countries') box.title = res.kpi.countryList.sort().join(', ') || d.sl;
     if (d.k === 'home') box.querySelector('.l').textContent = ctx.homes.some(h => !h.labelled) ? 'Time at home (inferred)' : 'Time at home';
     // sparkline
@@ -442,7 +444,7 @@ function renderSources() {
     c.querySelector('.vis').onclick = () => {
       if (S.hidden.has(s.id)) S.hidden.delete(s.id);
       else { if (S.sources.filter(o => !S.hidden.has(o.id)).length <= 1) { toast('At least one device must stay visible.'); return; } S.hidden.add(s.id); }
-      if (S.mode === 'combined') rebuildAll(); else { renderSources(); renderTogether(); refresh('sources'); }
+      if (S.mode === 'combined') rebuildAll(); else { markDuplicates(); renderSources(); renderTogether(); refresh('sources'); }
     };
     const sel = c.querySelector('select');
     if (sel) sel.onchange = async () => {

@@ -33,13 +33,17 @@ the font, and the optional street-map tiles (see [Deploy](#deploy)).
   (00:00–06:00). Visits that Google labels as home count extra. A month or two away between
   stays at the same home counts as travel, not a move. A long gap in the data leaves home
   unknown and is never bridged. "Time at home" and "farthest from home" use the home of the
-  time, and months with no known home are left out. Work comes from Google's label, or it is
-  inferred from weekday office hours.
+  time, and months with no known home are left out. Work changes over time in the same way,
+  from weekday hours between 09:00 and 17:00 and Google's work labels. Office hours alone
+  must cover at least two months.
 - **Playback.** Moving heads with fading tails. The speed runs from 5 minutes to 60 days
   per second, and there is an option to skip the time spent at places.
 - **More than one device.** Load files from several phones, a watch or GPX tracks. Show
   each device in its own colour, or combine them into one history with duplicate records
-  removed. Itinera reports how often two devices were together.
+  removed. Itinera reports how often two devices were together. The totals describe one
+  person. Where devices overlap in time, the device that covers the most days counts. A trip
+  from another device is dropped only if the main device was also moving then, so a phone
+  left at home does not cancel a run recorded by a watch.
 - **Export** the current selection of places and trips as GeoJSON.
 
 All local times use the UTC offset stored with each record, so trips across time zones
@@ -126,7 +130,8 @@ npm run shots        # screenshots of the main views, light and dark, into tests
 
 The smoke test serves the page over http, so its security policy applies as on a real
 host. It loads the sample and checks the key numbers: 3 devices, 30 places, home and work
-found, 2 countries, and "98% together". It also checks that:
+found, 2 countries, "98% together", and a distance within 100 km of the true 9,881 km.
+It also checks that:
 
 - the cube floor and the map view survive a change of view;
 - trails render, which proves the map worker runs under the policy;

@@ -101,15 +101,16 @@ function loadNames() { try { return JSON.parse(localStorage.getItem('itinera-nam
 function saveName(key, name) { try { const n = loadNames(); if (name) n[key] = name; else delete n[key]; localStorage.setItem('itinera-names', JSON.stringify(n)); } catch (e) { } }
 const placeKey = p => p.lat.toFixed(3) + ',' + p.lon.toFixed(3);
 
-/* Home can change over time (moving house or country). Each local month, the candidate home is the
-   place with most night hours (00-06), with visits that Google labels HOME weighted 1.5x. A run of up
-   to 2 months elsewhere between the same home is travel; up to 3 months without evidence between the
-   same home is filled. Longer gaps stay unknown, so a home is never carried across a data gap. */
-function homePeriods(nightMon, nightVisits, offOf) {
-  const ms = [...nightMon.keys()]; if (!ms.length) return [];
+/* Home and work can change over time (moving house, country or job). Each local month, the candidate
+   is the place with most evidence: night hours (00-06) for home, weekday 09-17 hours for work, with
+   visits that Google labels HOME or WORK weighted 1.5x. A run of up to 2 months elsewhere between the
+   same place is travel; up to 3 months without evidence between the same place is filled. Longer gaps
+   stay unknown, so a role is never carried across a data gap. */
+function rolePeriods(byMon, firstVisits, offOf, minH) {
+  const ms = [...byMon.keys()]; if (!ms.length) return [];
   const m0 = Math.min(...ms), n = Math.max(...ms) - m0 + 1;
   const cand = new Int32Array(n).fill(-1);
-  for (const [m, mm] of nightMon) { let best = -1, bh = 24 * HOUR; for (const [pi, h] of mm) if (h > bh) { bh = h; best = pi; } cand[m - m0] = best; }
+  for (const [m, mm] of byMon) { let best = -1, bh = minH; for (const [pi, h] of mm) if (h > bh) { bh = h; best = pi; } cand[m - m0] = best; }
   const runs = () => { const r = []; for (let i = 0; i < n; i++) { const l = r[r.length - 1]; if (l && l.p === cand[i]) l.b = i; else r.push({ p: cand[i], a: i, b: i }); } return r; };
   for (let pass = 0; pass < 2; pass++) {
     const r = runs();
@@ -120,11 +121,11 @@ function homePeriods(nightMon, nightVisits, offOf) {
   }
   const monStart = (m, pi) => Date.UTC(Math.floor(m / 12), m % 12, 1) - offOf(pi) * MIN;
   const out = runs().filter(x => x.p >= 0).map(x => ({ place: x.p, t0: monStart(m0 + x.a, x.p), t1: monStart(m0 + x.b + 1, x.p), mon0: m0 + x.a, mon1: m0 + x.b }));
-  // a move inside a month: the new home starts with its first night there
+  // a move inside a month: the new place starts with its first visit that counts as evidence
   for (let k = 1; k < out.length; k++) {
     const a = out[k - 1], b = out[k];
     if (a.mon1 + 1 !== b.mon0) continue;
-    const first = nightVisits.find(([t, pi]) => pi === b.place && t >= monStart(a.mon1, a.place) && t < b.t1);
+    const first = firstVisits.find(([t, pi]) => pi === b.place && t >= monStart(a.mon1, a.place) && t < b.t1);
     if (first) a.t1 = b.t0 = first[0];
   }
   return out;
@@ -146,7 +147,8 @@ function buildContext() {
   const order = allV.slice().sort((a, b) => b.dur - a.dur);
   const places = ctx.places;
   const gk = (a, b) => a + ':' + b;
-  const nightMon = new Map(), nightVisits = [];
+  const nightMon = new Map(), nightVisits = [], workMon = new Map(), workVisits = [];
+  const addMon = (map, m, pi, h) => { let mm = map.get(m); if (!mm) map.set(m, mm = new Map()); mm.set(pi, (mm.get(pi) || 0) + h); };
   for (const v of order) {
     let pi = -1;
     if (v.pid && byPid.has(v.pid)) pi = byPid.get(v.pid);
@@ -160,7 +162,7 @@ function buildContext() {
     }
     if (pi < 0) {
       pi = places.length;
-      places.push({ i: pi, lat: v.lat, lon: v.lon, off: v.off, dur: 0, n: 0, names: new Map(), types: new Map(), pids: new Set(), first: Infinity, last: -Infinity, night: 0, workish: 0, homeTyped: 0 });
+      places.push({ i: pi, lat: v.lat, lon: v.lon, off: v.off, dur: 0, n: 0, names: new Map(), types: new Map(), pids: new Set(), first: Infinity, last: -Infinity, night: 0, workish: 0, homeTyped: 0, workTyped: 0 });
       const k = gk(Math.floor(v.lon / CELL), Math.floor(v.lat / CELL));
       if (!grid.has(k)) grid.set(k, []);
       grid.get(k).push(pi);
@@ -171,10 +173,11 @@ function buildContext() {
     if (v.name) p.names.set(v.name, (p.names.get(v.name) || 0) + v.dur);
     if (v.type) p.types.set(v.type, (p.types.get(v.type) || 0) + v.dur);
     if (/HOME/i.test(v.type || '')) p.homeTyped += v.dur;
+    if (/WORK/i.test(v.type || '')) p.workTyped += v.dur;
     p.first = Math.min(p.first, v.t0); p.last = Math.max(p.last, v.t1);
     // night (00-06 local) and weekday office hours (09-17) overlap
-    let t = v.t0, slept = false;
-    const L = v.off * MIN, homeW = /HOME/i.test(v.type || '') ? 1.5 : 1;
+    let t = v.t0, slept = false, worked = false;
+    const L = v.off * MIN, homeW = /HOME/i.test(v.type || '') ? 1.5 : 1, workW = /WORK/i.test(v.type || '') ? 1.5 : 1;
     while (t < v.t1) {
       const lt = t + L, dayStart = Math.floor(lt / DAY) * DAY - L;
       const dow = (Math.floor(lt / DAY) + 3) % 7;
@@ -182,49 +185,49 @@ function buildContext() {
       const nh = Math.max(0, Math.min(v.t1, n1) - Math.max(v.t0, n0));
       if (nh > 0) {
         p.night += nh; slept = true;
-        const m = monthOfDay(Math.floor(lt / DAY));
-        let mm = nightMon.get(m); if (!mm) nightMon.set(m, mm = new Map());
-        mm.set(pi, (mm.get(pi) || 0) + nh * homeW);
+        addMon(nightMon, monthOfDay(Math.floor(lt / DAY)), pi, nh * homeW);
       }
-      if (dow < 5) p.workish += Math.max(0, Math.min(v.t1, w1) - Math.max(v.t0, w0));
+      const wh = dow < 5 ? Math.max(0, Math.min(v.t1, w1) - Math.max(v.t0, w0)) : 0;
+      if (wh > 0) {
+        p.workish += wh; worked = true;
+        addMon(workMon, monthOfDay(Math.floor(lt / DAY)), pi, wh * workW);
+      }
       t = dayStart + DAY;
     }
     if (slept) nightVisits.push([v.t0, pi]);
+    if (worked) workVisits.push([v.t0, pi]);
   }
-  nightVisits.sort((a, b) => a[0] - b[0]);
+  nightVisits.sort((a, b) => a[0] - b[0]); workVisits.sort((a, b) => a[0] - b[0]);
   // ---- names and roles
   const saved = loadNames();
-  const topType = p => [...p.types.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || '';
-  const homes = homePeriods(nightMon, nightVisits, pi => places[pi].off);
+  const homes = rolePeriods(nightMon, nightVisits, pi => places[pi].off, 24 * HOUR);
   for (const h of homes) h.labelled = places[h.place].homeTyped >= DAY; // Google labels it home, at least for a day in total
   ctx.homes = homes; ctx.homeT0 = homes.map(h => h.t0);
   ctx.homeSet = new Set(homes.map(h => h.place));
-  const home = homes.length ? homes[homes.length - 1].place : -1; // the latest home
-  let workT = -1;
-  places.forEach((p, i) => {
-    if (/WORK/i.test(topType(p)) && !ctx.homeSet.has(i) && (workT < 0 || p.dur > places[workT].dur)) workT = i;
+  // work: weekday office hours at a place that is never home, at least 20 h in the month
+  for (const mm of workMon.values()) for (const pi of ctx.homeSet) mm.delete(pi);
+  const works = rolePeriods(workMon, workVisits, pi => places[pi].off, 20 * HOUR).filter(w => {
+    w.labelled = places[w.place].workTyped >= DAY;
+    return w.labelled || w.mon1 > w.mon0; // office hours alone need at least two months
   });
-  let work = workT;
-  if (work < 0) {
-    let best = -1, bw = 40 * HOUR;
-    places.forEach((p, i) => { if (!ctx.homeSet.has(i) && p.workish > bw) { bw = p.workish; best = i; } });
-    work = best;
-  }
-  ctx.home = home; ctx.work = work;
+  ctx.works = works; ctx.workSet = new Set(works.map(w => w.place));
+  ctx.home = homes.length ? homes[homes.length - 1].place : -1; // the latest home
+  ctx.work = works.length ? works[works.length - 1].place : -1;
   const yr = t => new Date(t).getUTCFullYear();
+  const span = (periods, i) => {
+    const ys = new Set();
+    for (const h of periods) if (h.place === i) for (let y = yr(h.t0); y <= yr(h.t1 - 1); y++) ys.add(y);
+    const runs = [];
+    for (const y of [...ys].sort()) { const r = runs[runs.length - 1]; if (r && y === r[1] + 1) r[1] = y; else runs.push([y, y]); }
+    return runs.map(([x, y]) => x === y ? String(x) : `${x}–${y}`).join(', ');
+  };
   places.forEach((p, i) => {
     p.key = placeKey(p);
     p.name = [...p.names.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || null;
-    p.role = ctx.homeSet.has(i) ? 'Home' : i === work ? 'Work' : null;
-    p.roleSpan = '';
-    if (ctx.homeSet.has(i) && ctx.homeSet.size > 1) {
-      const ys = new Set();
-      for (const h of homes) if (h.place === i) for (let y = yr(h.t0); y <= yr(h.t1 - 1); y++) ys.add(y);
-      const a = [...ys].sort(), runs = [];
-      for (const y of a) { const r = runs[runs.length - 1]; if (r && y === r[1] + 1) r[1] = y; else runs.push([y, y]); }
-      p.roleSpan = runs.map(([x, y]) => x === y ? String(x) : `${x}–${y}`).join(', ');
-    }
-    p.inferredRole = ctx.homeSet.has(i) ? !homes.some(h => h.place === i && h.labelled) : (i === work && workT < 0);
+    const periods = ctx.homeSet.has(i) ? homes : ctx.workSet.has(i) ? works : null;
+    p.role = periods === homes ? 'Home' : periods === works ? 'Work' : null;
+    p.roleSpan = periods && new Set(periods.map(h => h.place)).size > 1 ? span(periods, i) : '';
+    p.inferredRole = !!periods && !periods.some(h => h.place === i && h.labelled);
     p.country = countryAt(p.lat, p.lon);
     p.town = nearTown(p.lat, p.lon);
     p.custom = saved[p.key] || null;
@@ -252,6 +255,7 @@ function buildContext() {
   ctx.day0 = Math.floor((t0 + offRef * MIN) / DAY) - 1;
   ctx.day1 = Math.floor((t1 + offRef * MIN) / DAY) + 1;
   ctx.nDays = ctx.day1 - ctx.day0 + 1;
+  markDuplicates(ctx);
   ctx.homeByDay = Int32Array.from({ length: ctx.nDays }, (_, d) => homeAt((ctx.day0 + d) * DAY + 12 * HOUR - offRef * MIN, ctx));
   ctx.mon0 = monthOfDay(ctx.day0); ctx.mon1 = monthOfDay(ctx.day1);
   ctx.wk0 = Math.floor((ctx.day0 + 3) / 7); ctx.wk1 = Math.floor((ctx.day1 + 3) / 7);
@@ -277,6 +281,35 @@ function defaultLabel(p) {
   if (p.custom || p.name) return p.custom || p.name;
   if (p.role) return p.roleSpan ? `${p.role}${p.town ? ', ' + p.town : ''} (${p.roleSpan})` : p.role;
   return `Place ${p.rank}${p.town || p.country ? ', ' + (p.town || p.country) : ''}`;
+}
+
+/* One person, several devices: a person is in one place at a time. Where visible devices overlap in
+   time, person-level totals (KPIs, monthly series, modes, place times, flows) count the device that
+   covers the most days; the others' overlapping stays and trips get dup = true. A device only moves when
+   it is carried, so a trip is dropped only when a higher-ranked device was also moving (a phone left
+   at home does not cancel a run recorded by a watch). Devices that cover different periods add up.
+   Maps, the cube and the per-device timeline rows still show every device. */
+function markDuplicates(ctx = S.ctx) {
+  const all = activeSources();
+  for (const s of all) { for (const v of s.visits) v.dup = false; for (const t of s.trips) t.dup = false; }
+  // the main device covers the most days; ties go to the one with more records
+  const days = s => s._days ??= new Set(Array.from(s.T, (t, i) => Math.floor((t + s.OF[i] * MIN) / DAY))).size;
+  const srcs = all.filter(s => !S.hidden.has(s.id)).sort((a, b) => days(b) - days(a) || b.T.length - a.T.length);
+  // sorted, disjoint [t0, t1] intervals from higher-ranked devices: any record (stays and trips), and moving only
+  let any = [], moving = [];
+  const merge = (cover, add) => {
+    const out = [];
+    for (const x of [...cover, ...add].sort((a, b) => a[0] - b[0])) { const l = out[out.length - 1]; if (l && x[0] <= l[1]) l[1] = Math.max(l[1], x[1]); else out.push([x[0], x[1]]); }
+    return out;
+  };
+  const covered = (cover, starts, a, b) => { let o = 0; for (let k = bisect(starts, b) - 1; k >= 0 && cover[k][1] > a; k--) o += Math.min(b, cover[k][1]) - Math.max(a, cover[k][0]); return o > 0.5 * (b - a); };
+  for (const s of srcs) {
+    const sa = any.map(c => c[0]), sm = moving.map(c => c[0]), addAny = [], addMove = [];
+    for (const v of s.visits) { if (covered(any, sa, v.t0, v.t1)) v.dup = true; else addAny.push([v.t0, v.t1]); }
+    for (const t of s.trips) { if (covered(moving, sm, t.t0, t.t1)) t.dup = true; else { addAny.push([t.t0, t.t1]); addMove.push([t.t0, t.t1]); } }
+    any = merge(any, addAny); moving = merge(moving, addMove);
+  }
+  if (ctx) ctx.dupCount = all.reduce((a, s) => a + s.visits.filter(v => v.dup).length + s.trips.filter(t => t.dup).length, 0);
 }
 
 /* ---------- filtering ---------- */
@@ -323,25 +356,26 @@ function compute() {
     for (const t of s.trips) if (passes(t, null, true)) Tr.push(t);
   }
   res.V = V; res.T = Tr;
+  const V1 = V.filter(v => !v.dup), T1 = Tr.filter(t => !t.dup); // one person: see markDuplicates()
   // ---------- KPIs
   const k = {};
-  k.dist = Tr.reduce((a, t) => a + t.dist, 0);
+  k.dist = T1.reduce((a, t) => a + t.dist, 0);
   const days = new Set(); V.forEach(v => days.add(v.day)); Tr.forEach(t => days.add(t.day));
   k.days = days.size;
-  const pl = new Set(V.map(v => v.place)); k.places = pl.size;
+  const pl = new Set(V1.map(v => v.place)); k.places = pl.size;
   const cs = new Set(); pl.forEach(i => { const c = ctx.places[i]?.country; if (c) cs.add(c); }); k.countries = cs.size; k.countryList = [...cs];
-  k.rog = rog(V, clipDur);
+  k.rog = rog(V1, clipDur);
   // share of stay time at the home of that time; months with no known home are left out
   let tot = 0, hm = 0;
-  for (const v of V) { const h = homeAt(v.t0); if (h < 0) continue; const d = clipDur(v); tot += d; if (v.place === h) hm += d; }
+  for (const v of V1) { const h = homeAt(v.t0); if (h < 0) continue; const d = clipDur(v); tot += d; if (v.place === h) hm += d; }
   k.home = tot ? hm / tot : null;
   res.kpi = k;
 
   // ---------- except time: monthly/daily/weekly series
   const Vx = [], Tx = [];
   for (const s of srcs) {
-    for (const v of s.visits) if (passes(v, 'time', false)) Vx.push(v);
-    for (const t of s.trips) if (passes(t, 'time', true)) Tx.push(t);
+    for (const v of s.visits) if (!v.dup && passes(v, 'time', false)) Vx.push(v);
+    for (const t of s.trips) if (!t.dup && passes(t, 'time', true)) Tx.push(t);
   }
   const mDist = new Float64Array(nM), mDays = new Map(), mNew = new Float64Array(nM), mCountry = new Map(), mRogV = new Map(), mHome = new Float64Array(nM), mTot = new Float64Array(nM);
   for (const t of Tx) { const m = t.mon - ctx.mon0; if (m >= 0 && m < nM) mDist[m] += t.dist; const key = t.mon; if (!mDays.has(key)) mDays.set(key, new Set()); mDays.get(key).add(t.day); }
@@ -418,12 +452,12 @@ function compute() {
 
   // ---------- except modes
   const md = MODES.map(m => ({ k: m.k, dist: 0, dur: 0, n: 0 }));
-  for (const s of srcs) for (const t of s.trips) { if (!passes(t, 'modes', true)) continue; const m = md[MODE_IDX[t.mode] ?? 5]; m.dist += t.dist; m.dur += t.dur; m.n++; }
+  for (const s of srcs) for (const t of s.trips) { if (t.dup || !passes(t, 'modes', true)) continue; const m = md[MODE_IDX[t.mode] ?? 5]; m.dist += t.dist; m.dur += t.dur; m.n++; }
   res.modes = md;
 
   // ---------- places (all filters)
   const pd = new Map();
-  for (const v of V) {
+  for (const v of V1) {
     let o = pd.get(v.place);
     if (!o) { o = { i: v.place, dur: 0, n: 0, arr: new Float32Array(24), srcs: new Set(), first: Infinity, last: -Infinity }; pd.set(v.place, o); }
     o.dur += clipDur(v); o.n++; o.arr[v.h]++; o.srcs.add(v.src); o.first = Math.min(o.first, v.t0); o.last = Math.max(o.last, v.t1);
@@ -432,7 +466,7 @@ function compute() {
   res.places = [...pd.values()].sort((a, b) => b.dur - a.dur);
   // ---------- flows
   const fl = new Map();
-  for (const t of Tr) {
+  for (const t of T1) {
     if (t.from < 0 || t.to < 0 || t.from === t.to) continue;
     const a = Math.min(t.from, t.to), b = Math.max(t.from, t.to), key = a + '-' + b;
     fl.set(key, (fl.get(key) || 0) + 1);

@@ -128,9 +128,14 @@ files -> loadFiles() -> detectAndParse() -> raw sources  (points P{t,lat,lon,acc
   between the same home, and it never bridges long gaps. The result is
   `ctx.homes = [{place, t0, t1, labelled}]`, with `homeAt(t)`, `ctx.homeByDay`,
   `ctx.homeSet`, and `ctx.home` for the latest home. Every home-based value (time at home,
-  farthest from home, the cube, "Home area") uses the home of that time. Work is still one
-  place: the Google `WORK` label, or else the place with the most weekday time from 09:00
-  to 17:00. Inferred roles show "inferred" or "?" in the UI.
+  farthest from home, the cube, "Home area") uses the home of that time. Work uses the same
+  `rolePeriods()` with weekday 09:00–17:00 hours (`ctx.works`, `ctx.workSet`). Hours-only
+  work periods need at least 2 months. Inferred roles show "inferred" or "?" in the UI.
+- Several devices, one person: `markDuplicates()` marks `dup = true` on stays and trips that
+  overlap a higher-ranked device (ranked by days with records). A trip is dropped only if the
+  higher-ranked device was also moving. Person-level aggregates in `compute()` (KPIs, monthly
+  series, far-from-home, modes, place times, flows) skip `dup` items. The map, the cube and
+  `res.V`/`res.T` keep them all. It runs again when a device is hidden or shown.
 - Unnamed places are labelled with `nearTown()`: the nearest GeoNames town within 30 km,
   from the inlined `GAZ`, with no network. The user can rename places. Names are kept in
   `localStorage['itinera-names']` and keyed by rounded coordinates.
@@ -265,10 +270,6 @@ Semantic Location History), combined mode, export, the layer toggles, mobile lay
 8. **Timeline axis.** The first tick label is clipped (for example "017").
 9. **Cube at world scale.** With ten years and two continents, local trips collapse to dots.
    Consider a default floor of the home area, or a log-time axis.
-10. **KPI meaning in separate mode.** "Distance travelled" adds all devices together, so two
-    phones carried together count the same trip twice. "Time at home" mixes devices. Choose
-    one: show the value of the primary or selected device, or label the value "sum of
-    devices" and point to combined mode. Make the choice clear in the UI.
 11. **Progressive reveal in playback** looks as if nothing changes when the routes repeat.
     Consider a short "recent trips" highlight in addition to the tail.
 12. **Load time.** About 1 s of JS work for the sample. `makeSample()` takes about 0.7 s.
@@ -278,8 +279,6 @@ Semantic Location History), combined mode, export, the layer toggles, mobile lay
 14. **Test real exports.** Android is done. iPhone, Records.json and Semantic Location
     History are still needed. Add samples to `tests/fixtures/` only if the owner agrees.
     They are personal location data. Never commit real location data to a public repository.
-17. **Work over time.** Work is still one place. Use the same monthly method as for home,
-    with weekday office hours.
 18. **Street-level place names (optional).** The owner wants more context. Online reverse
     geocoding would send coordinates off the device, so it must be opt-in and needs a new
     `connect-src` host in `csp()`. Tell the user what is sent before the first request.

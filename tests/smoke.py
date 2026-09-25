@@ -33,7 +33,9 @@ async def main():
         blocked = await pg.evaluate("fetch('https://example.com/').then(() => false, () => true)")
         print('request to another site blocked:', blocked)
         ok = (not errs and r['home'] == 'Home' and r['work'] == 'Work' and r['kpi']['countries'] == 2
-              and len(r['sources']) == 3 and r['cubeFloorOk'] and r['mapViewKept'] and r['trailsRendered'] and r['zipOk'] and blocked and all(t != '0' for t in r['kpiText'][:3]))
+              and len(r['sources']) == 3 and r['cubeFloorOk'] and r['mapViewKept'] and r['trailsRendered'] and r['zipOk'] and blocked
+              # one person: phone trips (9,328 km) + watch runs (553 km); the work phone's copies are not added
+              and abs(r['kpi']['dist'] / 1000 - 9881) < 100 and all(t != '0' for t in r['kpiText'][:3]))
         await b.close()
         print('SMOKE', 'PASS' if ok else 'FAIL')
         sys.exit(0 if ok else 1)

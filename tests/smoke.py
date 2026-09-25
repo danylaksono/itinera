@@ -22,11 +22,18 @@ async def main():
         await pg.click('#viewSeg button[data-v=map]'); await pg.wait_for_timeout(1000)
         back = await pg.evaluate('map.getBounds().toArray().flat()')
         r['mapViewKept'] = all(abs(a - b) < 1e-3 for a, b in zip(before, back))
+        # trails drawn = the MapLibre worker runs under the page's policy
+        r['trailsRendered'] = await pg.evaluate("map.queryRenderedFeatures({layers: ['trails']}).length > 0")
+        # Takeout .zip reading works under the policy
+        r['zipOk'] = await pg.evaluate("new JSZip().file('a.json', '{}').generateAsync({type: 'blob'}).then(b => JSZip.loadAsync(b)).then(z => z.file('a.json').async('string')).then(t => t === '{}', () => false)")
         print(json.dumps(r, indent=1))
         errs = [l for l in logs if 'PAGEERROR' in l or ('error' in l and 'fonts.googleapis' not in l and '403' not in l)]
         for l in logs: print(l)
+        # privacy: the page's policy must stop a request to any other site (this logs one expected error)
+        blocked = await pg.evaluate("fetch('https://example.com/').then(() => false, () => true)")
+        print('request to another site blocked:', blocked)
         ok = (not errs and r['home'] == 'Home' and r['work'] == 'Work' and r['kpi']['countries'] == 2
-              and len(r['sources']) == 3 and r['cubeFloorOk'] and r['mapViewKept'] and all(t != '0' for t in r['kpiText'][:3]))
+              and len(r['sources']) == 3 and r['cubeFloorOk'] and r['mapViewKept'] and r['trailsRendered'] and r['zipOk'] and blocked and all(t != '0' for t in r['kpiText'][:3]))
         await b.close()
         print('SMOKE', 'PASS' if ok else 'FAIL')
         sys.exit(0 if ok else 1)

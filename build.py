@@ -3,10 +3,11 @@
   python3 build.py prod  -> dist/itinera.html       (libraries from CDNs; this is the file to publish)
   python3 build.py test  -> dist/itinera.test.html  (libraries from ./node_modules; works offline)
 
-Both builds inline the MapLibre CSS, the world-atlas countries (about 0.75 MB) and a gazetteer of
+Both builds carry a Content-Security-Policy (see csp() below), so the browser itself
+enforces that the page sends no data anywhere. Both builds inline the MapLibre CSS, the world-atlas countries (about 0.75 MB) and a gazetteer of
 towns over 15,000 people from GeoNames (about 0.5 MB, made by tools/gazetteer.js).
 """
-import sys, json, glob, os, subprocess
+import sys, json, glob, os, subprocess, re, hashlib, base64
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 LIB = os.environ.get('ITINERA_LIB', os.path.join(ROOT, 'node_modules'))
@@ -23,6 +24,21 @@ LIBS = [
     ('topojson-client/dist/topojson-client.min.js', 'https://cdn.jsdelivr.net/npm/topojson-client@3.1.0/dist/topojson-client.min.js'),
     ('jszip/dist/jszip.min.js', 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js'),
 ]
+
+def csp(html, script_hosts):
+    """The only way out of the page is the optional street tiles; everything else is blocked."""
+    hashes = ' '.join("'sha256-" + base64.b64encode(hashlib.sha256(s.encode('utf-8')).digest()).decode() + "'"
+                      for s in re.findall(r'<script>(.*?)</script>', html, re.S))
+    policy = '; '.join([
+        "default-src 'none'",
+        f"script-src {script_hosts} {hashes}",
+        "worker-src blob:",                                     # MapLibre starts its worker from a blob
+        "style-src 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src https://fonts.gstatic.com",
+        "img-src data: blob: https://*.basemaps.cartocdn.com",
+        "connect-src https://*.basemaps.cartocdn.com",          # street tiles, only when that layer is on
+        "base-uri 'none'", "form-action 'none'"])
+    return html.replace('<!--CSP-->', f'<meta http-equiv="Content-Security-Policy" content="{policy}">')
 
 def read(p):
     with open(p, encoding='utf-8') as f:
@@ -47,6 +63,7 @@ out = (tpl.replace('/*MAPLIBRE_CSS*/', css)
           .replace('/*WORLD*/', 'const WORLD_TOPO=' + world + ';')
           .replace('/*GAZ*/', 'const GAZ=' + gaz + ';')
           .replace('/*APP*/', app))
+out = csp(out, "https://cdn.jsdelivr.net https://cdnjs.cloudflare.com" if mode == 'prod' else "'self'")
 os.makedirs(os.path.dirname(dst), exist_ok=True)
 with open(dst, 'w', encoding='utf-8') as f:
     f.write(out)
@@ -55,5 +72,3 @@ if mode == 'prod':  # static hosts (GitHub Pages, Netlify) serve index.html
         f.write(out)
 size = len(out.encode('utf-8'))
 print(f'{dst}  {size/1e6:.2f} MB')
-if size > 16e6:
-    sys.exit('ERROR: file is over the 16 MB artifact limit')

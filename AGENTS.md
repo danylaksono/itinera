@@ -24,22 +24,27 @@ are more important than decoration.
 
 ## 2. Hard constraints
 
-The final product is **one self-contained HTML file** (`dist/itinera.html`). The owner
-publishes it as a Claude artifact, so it must obey these rules. If you break them, the
-page publishes but does not work:
+The final product is **one self-contained HTML file** (`dist/index.html`, also written as
+`dist/itinera.html`). It is hosted as a static page on GitHub Pages or Netlify. It is no
+longer built as a Claude artifact.
 
-- External scripts can load **only** from `https://cdn.jsdelivr.net/npm/`,
-  `https://cdnjs.cloudflare.com`, `https://cdn.tailwindcss.com`, `https://code.jquery.com`.
-  Use exact pinned versions of UMD builds.
-- External stylesheets can load only from `https://fonts.googleapis.com` (font files from
-  `fonts.gstatic.com`). All other CSS must be inline. The MapLibre CSS is inlined by the build.
-- No other network requests: no remote tiles, no remote images, no `fetch` to other sites.
-  The world basemap is embedded (world-atlas `countries-50m`, about 0.75 MB).
-- The file must stay under 16 MB.
+The build puts a **Content-Security-Policy** meta tag in the page (`csp()` in `build.py`), so
+the browser enforces the privacy promise. If you break these rules, the page is blocked:
+
+- Scripts load **only** from `https://cdn.jsdelivr.net` and `https://cdnjs.cloudflare.com`
+  (exact pinned UMD builds), plus the inline scripts. `build.py` hashes the inline scripts,
+  so do not add inline `on…=` handlers and do not use `eval` or `new Function`.
+- Stylesheets come only from `https://fonts.googleapis.com` (font files from
+  `fonts.gstatic.com`) and inline CSS. The MapLibre CSS is inlined by the build.
+- The only allowed connection is the optional CARTO street tiles (`*.basemaps.cartocdn.com`).
+  There are no other `fetch` calls, remote images or trackers. The world basemap and the town
+  list are embedded.
+- MapLibre's worker needs `worker-src blob:`.
+- If a new feature really needs another host, add it to `csp()` and say so in the README.
+- The smoke test runs the test build over http under the same policy. It fails on any policy
+  violation, and it checks that a `fetch` to another site is blocked.
 - `localStorage` works but can be empty. Always wrap it in `try/catch`.
-- Downloads: use `await window.claude?.use?.('downloads')` then `dl.save({ filename, data })`.
-  The allowlist includes `.json` but not `.geojson`, so export GeoJSON with a `.json` name.
-  Keep the Blob-link fallback for when the capability is `null` (for example, a local file).
+- Export uses a Blob download link (`itinera-selection.geojson`).
 - Theme: the viewer can set `data-theme="light|dark"` on `<html>`. The page also follows
   `prefers-color-scheme`. `applyTheme()` in `g_main.js` writes `data-dark="1|0"`, and all
   JS colour code reads `isDark()`.
@@ -269,34 +274,26 @@ Semantic Location History), combined mode, export, the layer toggles, mobile lay
 12. **Load time.** About 1 s of JS work for the sample. `makeSample()` takes about 0.7 s.
     `togetherness()` runs on every `renderSources`/`renderTogether` call. Cache it per
     source set. For large Records.json files (hundreds of MB), move parsing and
-    `finalize()` into a Web Worker, if the worker can be created from a Blob under the
-    artifact CSP (test that first).
-13. **MapLibre workers under the artifact CSP.** A test artifact was published. The owner
-    thinks land and trails appear, but that is not confirmed. On GitHub Pages or Netlify
-    this does not apply.
+    `finalize()` into a Web Worker created from a Blob (the policy allows `worker-src blob:`).
 14. **Test real exports.** Android is done. iPhone, Records.json and Semantic Location
     History are still needed. Add samples to `tests/fixtures/` only if the owner agrees.
     They are personal location data. Never commit real location data to a public repository.
 17. **Work over time.** Work is still one place. Use the same monthly method as for home,
     with weekday office hours.
 18. **Street-level place names (optional).** The owner wants more context. Online reverse
-    geocoding would send coordinates off the device, so it must be opt-in and only on the
-    hosted build (the artifact CSP blocks it). Tell the user what is sent before the first request.
+    geocoding would send coordinates off the device, so it must be opt-in and needs a new
+    `connect-src` host in `csp()`. Tell the user what is sent before the first request.
 15. Small clean-up: `parseRecords()` makes the default name with a `' ·'` string that it
     then replaces. Simplify it.
 16. Mobile layout (narrow screens) is not checked. The CSS has a breakpoint that stacks the views.
 
 ## 10. Publishing
 
-The page is published in two ways:
+GitHub Pages (`.github/workflows/pages.yml`) or Netlify (`netlify.toml`). Both run
+`npm ci && python3 build.py prod` and serve `dist/`. Do not publish Claude artifacts to test.
+Test locally with `npm test` and `npm run shots`.
 
-- **Claude artifact.** Publish `dist/itinera.html` with the `downloads` capability declared.
-  Claude Code can do this with the Artifact tool.
-- **GitHub Pages or Netlify.** Use `.github/workflows/pages.yml` or `netlify.toml`. Both run
-  `npm ci && python3 build.py prod` and serve `dist/`, and the build writes `dist/index.html`.
+Before you push, check:
 
-Before you publish, check:
-
-- `npm run build` finishes and the file is under 16 MB.
-- `dist/itinera.html` has no `node_modules` paths and no script hosts other than those in section 2.
 - `npm test` passes, and the screenshots in both themes look correct.
+- `dist/index.html` has no `node_modules` paths and no script hosts other than those in section 2.

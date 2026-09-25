@@ -7,7 +7,9 @@ the others filter to match.
 
 **Your data never leaves your browser.** Itinera is one static HTML page with no server and
 no upload. Files are read with the browser's File API. When you close the tab, the data is
-gone.
+gone. The page carries a Content-Security-Policy, so the browser itself blocks any attempt
+to send data elsewhere. The only outgoing requests it allows are the pinned library scripts,
+the font, and the optional street-map tiles (see [Deploy](#deploy)).
 
 ## What you can do
 
@@ -110,8 +112,9 @@ push to `main`. In the repository, open Settings › Pages and set *Source* to
 and the publish directory (`dist`). Connect the repository and deploy. For a one-off
 deploy, drag the `dist` folder onto Netlify Drop instead.
 
-The optional *Street map* layer loads CARTO tiles from the internet. It works on a normal
-host, but it is off by default so that the page makes no requests after it loads.
+The optional *Street map* layer loads CARTO tiles from the internet, and those requests show
+CARTO which map area you are viewing. The layer is off by default, so the page makes no
+requests after it loads unless you turn it on.
 
 ## Tests
 
@@ -121,9 +124,16 @@ npm test             # syntax check, test build, headless smoke test on the samp
 npm run shots        # screenshots of the main views, light and dark, into tests/out/
 ```
 
-The smoke test loads the sample and checks the key numbers: 3 devices, 30 places, home and
-work found, 2 countries, and "98% together". It also checks that the cube floor and the
-map view survive a change of view. Headless runs use software WebGL, so they are slow.
+The smoke test serves the page over http, so its security policy applies as on a real
+host. It loads the sample and checks the key numbers: 3 devices, 30 places, home and work
+found, 2 countries, and "98% together". It also checks that:
+
+- the cube floor and the map view survive a change of view;
+- trails render, which proves the map worker runs under the policy;
+- a `.zip` can be read;
+- a request to another site is blocked.
+
+Any policy violation fails the test. Headless runs use software WebGL, so they are slow.
 
 ## Project layout
 

@@ -271,7 +271,7 @@ function setStreets(on) {
 let streetsWarned = false;
 function streetsFailed() {
   if (streetsWarned) return; streetsWarned = true;
-  toast('Street tiles did not load. This page blocks online requests, so the map uses the built-in outline map. To use street tiles, save the page and open it from your own web server.', 9000);
+  toast('Street tiles did not load. Check your internet connection. The built-in outline map still works offline.', 9000);
 }
 function toast(msg, ms = 4000) {
   const t = $('#toast'); t.textContent = msg; t.hidden = false;

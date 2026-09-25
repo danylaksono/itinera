@@ -105,19 +105,7 @@ async function exportSelection() {
     feats.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: t.path.map(p => [+p[2].toFixed(6), +p[1].toFixed(6)]) }, properties: { kind: 'trip', device: srcById(t.src)?.name, mode: t.mode, mode_inferred: !!t.inferred, start: new Date(t.t0).toISOString(), end: new Date(t.t1).toISOString(), utc_offset_min: t.off, km: +(t.dist / 1000).toFixed(3), from: ctx.places[t.from]?.label ?? null, to: ctx.places[t.to]?.label ?? null } });
   }
   const data = JSON.stringify({ type: 'FeatureCollection', features: feats });
-  const filename = 'itinera-selection.json';
-  let dl = null;
-  try { dl = await window.claude?.use?.('downloads'); } catch (e) { dl = null; }
-  if (dl) { // inside a Claude artifact: the viewer confirms the save; a plain link would do nothing there
-    try {
-      await dl.save({ filename, data });
-      toast(`Saved ${res.places.length.toLocaleString('en-GB')} places and ${res.T.length.toLocaleString('en-GB')} trips as GeoJSON.`);
-    } catch (e) {
-      if (e?.code === 'rate_limited') toast('A save is already waiting for your answer.');
-      else if (e?.code !== 'declined') toast('This page cannot save files here.');
-    }
-    return;
-  }
+  const filename = 'itinera-selection.geojson';
   try {
     const url = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
     const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();

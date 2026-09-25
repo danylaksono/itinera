@@ -1,7 +1,7 @@
 """Screenshots of the main states. Run: python3 tests/shots.py [light|dark]  -> tests/out/*.png"""
 import asyncio, sys
 from playwright.async_api import async_playwright
-from common import launch, attach_logs, load_sample, OUT
+from common import launch, attach_logs, load_sample, OUT, PAGE
 
 async def main():
     scheme = sys.argv[1] if len(sys.argv) > 1 else 'light'
@@ -9,7 +9,7 @@ async def main():
         b = await launch(p)
         pg = await b.new_page(viewport={'width': 1440, 'height': 900}, color_scheme=scheme)
         logs = []; attach_logs(pg, logs)
-        await pg.goto((OUT.parent.parent / 'dist' / 'itinera.test.html').as_uri())
+        await pg.goto(PAGE)
         await pg.wait_for_timeout(2500)
         await pg.screenshot(path=str(OUT / f'0_landing_{scheme}.png'))
         await load_sample(pg)

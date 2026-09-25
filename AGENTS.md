@@ -50,7 +50,8 @@ page publishes but does not work:
 ```
 package.json        pinned library versions (dev dependencies) and npm scripts
 build.py            assembles src/ into dist/itinera.html (prod) or dist/itinera.test.html (test)
-src/template.html   all HTML and CSS; placeholders /*MAPLIBRE_CSS*/ <!--SCRIPTS--> /*WORLD*/ /*APP*/
+src/template.html   all HTML and CSS; placeholders /*MAPLIBRE_CSS*/ <!--SCRIPTS--> /*WORLD*/ /*GAZ*/ /*APP*/
+tools/gazetteer.js  prints the compact town list (GeoNames, population >= 15,000) that build.py inlines as GAZ
 src/a_data.js       utilities, file parsers, stay and trip detection, finalize(), file loading
 src/b_analytics.js  global state S, colours, places and roles, filters, compute(), co-location
 src/c_map.js        MapLibre map, layers, tooltips, legend, playback engine
@@ -114,11 +115,23 @@ files -> loadFiles() -> detectAndParse() -> raw sources  (points P{t,lat,lon,acc
 - If a source has no stays, `detectStays()` finds them (150 m, 15 min, split at record gaps
   over 6 h). If it has no trips, `finalize()` makes trips from records outside stays (split at
   gaps over 20 min), plus straight visit-to-visit jumps. GPX `<trk><type>` sets the mode.
-- Places: stays are clustered by `placeId`, or on a 160 m grid. Home is the Google `HOME`
-  label, or else the place with most time from 00:00 to 06:00. Work is the Google `WORK`
-  label, or else the place with most weekday time from 09:00 to 17:00. Inferred roles
-  show "inferred" or "?" in the UI. The user can rename places. Names are kept in
+- `finalize()` drops "trips" of over 2 h at under 1 km/h. They are gaps in the record, and
+  `src.gapTrips` counts them. Real exports have many of these, and they flattened the rhythm.
+- Places: stays are clustered by `placeId`, or on a 160 m grid. Home changes over time.
+  `homePeriods()` picks, for each local month, the place with the most night hours
+  (00:00–06:00), with Google `HOME` visits weighted 1.5×. It merges short detours and gaps
+  between the same home, and it never bridges long gaps. The result is
+  `ctx.homes = [{place, t0, t1, labelled}]`, with `homeAt(t)`, `ctx.homeByDay`,
+  `ctx.homeSet`, and `ctx.home` for the latest home. Every home-based value (time at home,
+  farthest from home, the cube, "Home area") uses the home of that time. Work is still one
+  place: the Google `WORK` label, or else the place with the most weekday time from 09:00
+  to 17:00. Inferred roles show "inferred" or "?" in the UI.
+- Unnamed places are labelled with `nearTown()`: the nearest GeoNames town within 30 km,
+  from the inlined `GAZ`, with no network. The user can rename places. Names are kept in
   `localStorage['itinera-names']` and keyed by rounded coordinates.
+- `M.bounds` in `c_map.js` is the map view the user chose. A hidden map (cube view) reports a
+  400×300 fallback canvas, so the cube floor and view switches use `viewBounds()` and
+  `restoreView()`, never a bare `map.getBounds()`.
 
 ### Supported inputs (`detectAndParse`)
 
@@ -221,13 +234,16 @@ bar (recolour, rename, hide, join, remove), device co-location, map layers and t
 playback (clock, playhead, current cells, tails, heads), split view, and the cube in its
 first version.
 
-Work that is not tested yet: dark mode, real export files (Takeout zip, iPhone JSON, the
-older Semantic Location History), combined mode, export, the layer toggles, mobile layout.
+Tested with a real ten-year Android `Timeline.json` from the owner. It is in `data_sample/`,
+which is git-ignored personal data: test with it only in local probes, and never commit,
+publish or quote it. Dark mode has been checked in screenshots.
+
+Work that is not tested yet: other real export files (Takeout zip, iPhone JSON, the older
+Semantic Location History), combined mode, export, the layer toggles, mobile layout.
 
 ## 9. Known issues and next tasks (in priority order)
 
-1. **Cube framing.** The camera is too close. The box goes past the top of the panel.
-   Fit the camera distance to the box size and the panel aspect ratio, and re-fit on resize.
+1. **Cube framing.** `fitCamera()` now fits the box. Check it again in the narrow split panel.
 2. **Cube caption.** The caption overlaps the lines. Give `.cube-cap` a panel background, or
    move it to a strip under the canvas.
 3. **Cube time labels.** The tick labels on the back-left edge are off-screen or hidden.
@@ -239,12 +255,11 @@ older Semantic Location History), combined mode, export, the layer toggles, mobi
    collision avoidance (drop the lower-ranked label).
 6. **Cube stays** are hard to see among many trips at the one-year scale. Consider thicker
    columns, trips drawn with less opacity when the time span is long, or a "stays only" toggle.
-7. **Legend duplicate.** When trips are coloured by travel mode, the legend shows "Flying"
-   and also the dashed "Flight" key. Show the dashed key only when the colour is by device or time.
-8. **Heat layer too heavy** at city zoom. It makes grey halos around the trails. Lower
-   `heatmap-opacity` or `heatmap-intensity` at high zoom, or fade the layer out above zoom 12.
-9. **Split view zoom.** After a change to split view, the map is zoomed in too far. Keep
-   the bounds (`map.getBounds()` before `map.resize()`, then `fitBounds` after it).
+7. **Calendar with many years.** A ten-year export shows about 3 cramped years. The year
+   label overlaps the month axis of the year above, and the last block is clipped.
+8. **Timeline axis.** The first tick label is clipped (for example "017").
+9. **Cube at world scale.** With ten years and two continents, local trips collapse to dots.
+   Consider a default floor of the home area, or a log-time axis.
 10. **KPI meaning in separate mode.** "Distance travelled" adds all devices together, so two
     phones carried together count the same trip twice. "Time at home" mixes devices. Choose
     one: show the value of the primary or selected device, or label the value "sum of
@@ -256,21 +271,31 @@ older Semantic Location History), combined mode, export, the layer toggles, mobi
     source set. For large Records.json files (hundreds of MB), move parsing and
     `finalize()` into a Web Worker, if the worker can be created from a Blob under the
     artifact CSP (test that first).
-13. **MapLibre workers under the artifact CSP.** MapLibre makes a worker from a `blob:` URL.
-    Confirm that it works in the published page. If it does not, set `maplibregl.workerUrl`
-    or use the CSP build of MapLibre.
-14. **Test real exports.** Get small real samples (the owner can supply them) for each format
-    in section 5. Add them to `tests/fixtures/` only if the owner agrees. They are personal
-    location data. Never commit real location data to a public repository.
+13. **MapLibre workers under the artifact CSP.** A test artifact was published. The owner
+    thinks land and trails appear, but that is not confirmed. On GitHub Pages or Netlify
+    this does not apply.
+14. **Test real exports.** Android is done. iPhone, Records.json and Semantic Location
+    History are still needed. Add samples to `tests/fixtures/` only if the owner agrees.
+    They are personal location data. Never commit real location data to a public repository.
+17. **Work over time.** Work is still one place. Use the same monthly method as for home,
+    with weekday office hours.
+18. **Street-level place names (optional).** The owner wants more context. Online reverse
+    geocoding would send coordinates off the device, so it must be opt-in and only on the
+    hosted build (the artifact CSP blocks it). Tell the user what is sent before the first request.
 15. Small clean-up: `parseRecords()` makes the default name with a `' ·'` string that it
     then replaces. Simplify it.
 16. Mobile layout (narrow screens) is not checked. The CSS has a breakpoint that stacks the views.
 
 ## 10. Publishing
 
-You cannot publish from the local machine. When `dist/itinera.html` is ready, the owner
-uploads it in a Claude chat and asks Claude to publish it as an artifact with the
-`downloads` capability declared. Before this, check:
+The page is published in two ways:
+
+- **Claude artifact.** Publish `dist/itinera.html` with the `downloads` capability declared.
+  Claude Code can do this with the Artifact tool.
+- **GitHub Pages or Netlify.** Use `.github/workflows/pages.yml` or `netlify.toml`. Both run
+  `npm ci && python3 build.py prod` and serve `dist/`, and the build writes `dist/index.html`.
+
+Before you publish, check:
 
 - `npm run build` finishes and the file is under 16 MB.
 - `dist/itinera.html` has no `node_modules` paths and no script hosts other than those in section 2.

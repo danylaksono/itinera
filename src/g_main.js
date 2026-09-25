@@ -106,10 +106,18 @@ async function exportSelection() {
   }
   const data = JSON.stringify({ type: 'FeatureCollection', features: feats });
   const filename = 'itinera-selection.json';
-  try {
-    const dl = await window.claude?.use?.('downloads');
-    if (dl) { await dl.save({ filename, data }); toast(`Saved ${res.places.length.toLocaleString('en-GB')} places and ${res.T.length.toLocaleString('en-GB')} trips as GeoJSON.`); return; }
-  } catch (e) { console.warn(e); }
+  let dl = null;
+  try { dl = await window.claude?.use?.('downloads'); } catch (e) { dl = null; }
+  if (dl) { // inside a Claude artifact: the viewer confirms the save; a plain link would do nothing there
+    try {
+      await dl.save({ filename, data });
+      toast(`Saved ${res.places.length.toLocaleString('en-GB')} places and ${res.T.length.toLocaleString('en-GB')} trips as GeoJSON.`);
+    } catch (e) {
+      if (e?.code === 'rate_limited') toast('A save is already waiting for your answer.');
+      else if (e?.code !== 'declined') toast('This page cannot save files here.');
+    }
+    return;
+  }
   try {
     const url = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
     const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();

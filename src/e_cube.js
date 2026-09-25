@@ -154,14 +154,14 @@ const Cube = (() => {
       const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.82 });
       const inst = new THREE.InstancedMesh(cyl, mat, stays.length);
       const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), ps = new THREE.Vector3();
-      const home = S.ctx.home;
+      const homes = S.ctx.homeSet;
       stays.forEach((v, i) => {
         const ya = toY(Math.max(v.t0, a)), yb = toY(Math.min(v.t1, b));
         const hh = Math.max(0.12, yb - ya);
-        const rr = v.place === home ? r * 1.25 : r;
+        const rr = homes.has(v.place) ? r * 1.25 : r;
         ps.set(toX(v.lon), ya + hh / 2, toZ(v.lat)); sc.set(rr, hh, rr);
         m4.compose(ps, q, sc); inst.setMatrixAt(i, m4);
-        const c = S.colorBy === 'device' ? col(trackColor(srcById(v.src) || activeSources()[0])) : col(v.place === home ? ink : cssv('--ink-2'));
+        const c = S.colorBy === 'device' ? col(trackColor(srcById(v.src) || activeSources()[0])) : col(homes.has(v.place) ? ink : cssv('--ink-2'));
         inst.setColorAt(i, c);
       });
       inst.instanceMatrix.needsUpdate = true; if (inst.instanceColor) inst.instanceColor.needsUpdate = true;

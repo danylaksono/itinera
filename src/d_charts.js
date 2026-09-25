@@ -26,7 +26,7 @@ const KPI_DEF = [
   { k: 'places', label: 'Places visited', unit: '', val: k => k.places, fmt: v => Math.round(v).toLocaleString('en-GB'), series: 'places', sl: 'New places each month' },
   { k: 'countries', label: 'Countries', unit: '', val: k => k.countries, fmt: v => Math.round(v), series: 'countries', sl: 'Countries each month' },
   { k: 'rog', label: 'Radius of gyration', unit: 'km', val: k => k.rog / 1000, fmt: v => v >= 100 ? Math.round(v).toLocaleString('en-GB') : v.toFixed(1), series: 'rog', sl: 'Typical spread of your places, each month' },
-  { k: 'home', label: 'Time at home', unit: '%', val: k => k.home == null ? NaN : k.home * 100, fmt: v => isNaN(v) ? '–' : Math.round(v), series: 'home', sl: 'Share of time at home each month' }
+  { k: 'home', label: 'Time at home', unit: '%', val: k => k.home == null ? NaN : k.home * 100, fmt: v => isNaN(v) ? '–' : Math.round(v), series: 'home', sl: 'Share of time at home each month. Home can change over time: each month it is the place with most nights, and Google home labels count extra. Months with no clear home are left out.' }
 ];
 const kpiShown = {};
 function renderKPIs() {
@@ -51,7 +51,7 @@ function renderKPIs() {
     } else nEl.textContent = d.fmt(target);
     kpiShown[d.k] = target;
     if (d.k === 'countries') box.title = res.kpi.countryList.sort().join(', ') || d.sl;
-    if (d.k === 'home') box.querySelector('.l').textContent = ctx.home >= 0 && ctx.places[ctx.home].inferredRole ? 'Time at home (inferred)' : 'Time at home';
+    if (d.k === 'home') box.querySelector('.l').textContent = ctx.homes.some(h => !h.labelled) ? 'Time at home (inferred)' : 'Time at home';
     // sparkline
     const svg = box.querySelector('svg'), w = svg.clientWidth || 160, h = 22;
     const s = res.monthly[d.series];
@@ -351,11 +351,11 @@ function renderPlaces() {
       const off = offNear(o.first);
       more = `<div class="place-more">
         <label class="nm-edit">Name <input type="text" value="${esc(p.custom || p.name || '')}" placeholder="${esc(p.role || 'Give this place a name')}" data-key="${p.key}"></label>
-        <dl><dt>Visits</dt><dd>${o.n}</dd><dt>Typical stay</dt><dd>${fmtDur(o.dur / o.n)}</dd><dt>First</dt><dd>${fmtLocal(o.first, off).date.slice(4)}</dd><dt>Last</dt><dd>${fmtLocal(o.last, off).date.slice(4)}</dd>${p.country ? `<dt>Country</dt><dd>${esc(p.country)}</dd>` : ''}${S.mode === 'separate' && srcNames.length ? `<dt>Seen by</dt><dd>${esc(srcNames.join(', '))}</dd>` : ''}</dl>
+        <dl><dt>Visits</dt><dd>${o.n}</dd><dt>Typical stay</dt><dd>${fmtDur(o.dur / o.n)}</dd><dt>First</dt><dd>${fmtLocal(o.first, off).date.slice(4)}</dd><dt>Last</dt><dd>${fmtLocal(o.last, off).date.slice(4)}</dd>${p.country ? `<dt>Where</dt><dd>${p.town ? 'Near ' + esc(p.town) + ', ' : ''}${esc(p.country)}</dd>` : ''}${S.mode === 'separate' && srcNames.length ? `<dt>Seen by</dt><dd>${esc(srcNames.join(', '))}</dd>` : ''}</dl>
         <div>Arrival hour<svg viewBox="0 0 ${W} ${H}">${bars}${tl}</svg></div></div>`;
     }
     return `<div class="place${sel === o.i ? ' sel' : ''}" data-i="${o.i}" tabindex="0" role="button" aria-expanded="${open}">
-      <div class="place-top"><span class="rk">${r + 1}</span><span class="pn">${esc(p.label)}${p.role && p.label !== p.role ? `<span class="role">${p.role}${p.inferredRole ? '?' : ''}</span>` : p.role && p.inferredRole ? '<span class="role">inferred</span>' : ''}</span>${spark(o.i)}<span class="hrs">${fmtDur(o.dur)}</span></div>${more}</div>`;
+      <div class="place-top"><span class="rk">${r + 1}</span><span class="pn">${esc(p.label)}${p.role && !p.label.startsWith(p.role) ? `<span class="role">${p.role}${p.inferredRole ? '?' : ''}</span>` : p.role && p.inferredRole ? '<span class="role">inferred</span>' : ''}</span>${spark(o.i)}<span class="hrs">${fmtDur(o.dur)}</span></div>${more}</div>`;
   };
   el.innerHTML = list.map(row).join('') + (res.places.length > placeLimit ? `<button class="btn small" id="morePlaces" style="margin-top:8px">Show ${Math.min(30, res.places.length - placeLimit)} more</button>` : '');
   $$('.place', el).forEach(r => {
@@ -371,7 +371,7 @@ function renderPlaces() {
       const p = ctx.places.find(q => q.key === inp.dataset.key); if (!p) return;
       const v = inp.value.trim();
       saveName(p.key, v); p.custom = v || null;
-      p.label = p.custom || p.name || p.role || `Place ${p.rank}${p.country ? ', ' + p.country : ''}`;
+      p.label = defaultLabel(p);
       renderPlaces(); renderFilters(); if (S.view !== 'map') Cube.schedule();
     };
     inp.onkeydown = e => { if (e.key === 'Enter') commit(); e.stopPropagation(); };

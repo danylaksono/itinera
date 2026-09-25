@@ -35,7 +35,7 @@ function initMap() {
     style: {
       version: 8,
       sources: {
-        land: { type: 'geojson', data: WORLD ? WORLD.land : empty, attribution: 'Natural Earth' },
+        land: { type: 'geojson', data: WORLD ? WORLD.land : empty, attribution: 'Natural Earth, GeoNames' },
         borders: { type: 'geojson', data: WORLD ? WORLD.borders : empty },
         grat: { type: 'geojson', data: graticule() }
       },
@@ -96,7 +96,7 @@ function bindMapEvents() {
     map.getCanvas().style.cursor = 'pointer';
     hoverPlace = f.properties.i;
     const p = S.ctx.places[f.properties.i];
-    showTip(e.originalEvent, `<b>${esc(p.label)}</b>${p.role && p.label !== p.role ? ` <span class="m">${p.role}${p.inferredRole ? ' (inferred)' : ''}</span>` : ''}<br>${fmtDur(f.properties.hrs * HOUR)} in ${f.properties.n} visit${f.properties.n === 1 ? '' : 's'}${p.country ? `<br><span class="m">${esc(p.country)}</span>` : ''}`);
+    showTip(e.originalEvent, `<b>${esc(p.label)}</b>${p.role && !p.label.startsWith(p.role) ? ` <span class="m">${p.role}${p.inferredRole ? ' (inferred)' : ''}</span>` : ''}<br>${fmtDur(f.properties.hrs * HOUR)} in ${f.properties.n} visit${f.properties.n === 1 ? '' : 's'}${p.country ? `<br><span class="m">${p.town ? 'Near ' + esc(p.town) + ', ' : ''}${esc(p.country)}</span>` : ''}`);
     highlightPlace(p.i, 'map');
   });
   map.on('mouseleave', 'places', () => { map.getCanvas().style.cursor = ''; hoverPlace = null; hideTip(); highlightPlace(null, 'map'); });
@@ -287,7 +287,8 @@ function fitHome(animate = true) {
   const pl = S.ctx.places.slice().sort((a, b) => b.dur - a.dur);
   if (!pl.length) return fitAll(animate);
   const tot = pl.reduce((a, p) => a + p.dur, 0);
-  const home = pl[0]; const sel = [];
+  const h = S.ctx.homes.length ? (homeAt(playRange()[1]) >= 0 ? homeAt(playRange()[1]) : S.ctx.home) : -1;
+  const home = S.ctx.places[h] || pl[0]; const sel = [];
   let acc = 0;
   for (const p of pl) { if (hav(home.lat, home.lon, p.lat, p.lon) > 60000) continue; sel.push([p.lon, p.lat]); acc += p.dur; if (acc > tot * 0.8 && sel.length > 3) break; }
   fitTo(boundsOf(sel), 60, 14, animate);

@@ -3,9 +3,10 @@
   python3 build.py prod  -> dist/itinera.html       (libraries from CDNs; this is the file to publish)
   python3 build.py test  -> dist/itinera.test.html  (libraries from ./node_modules; works offline)
 
-Both builds inline the MapLibre CSS and the world-atlas countries (about 0.75 MB).
+Both builds inline the MapLibre CSS, the world-atlas countries (about 0.75 MB) and a gazetteer of
+towns over 15,000 people from GeoNames (about 0.5 MB, made by tools/gazetteer.js).
 """
-import sys, json, glob, os
+import sys, json, glob, os, subprocess
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 LIB = os.environ.get('ITINERA_LIB', os.path.join(ROOT, 'node_modules'))
@@ -30,6 +31,7 @@ def read(p):
 tpl = read(os.path.join(ROOT, 'src/template.html'))
 css = read(os.path.join(LIB, 'maplibre-gl/dist/maplibre-gl.css'))
 world = json.dumps(json.loads(read(os.path.join(LIB, 'world-atlas/countries-50m.json'))), separators=(',', ':'))
+gaz = subprocess.run(['node', os.path.join(ROOT, 'tools/gazetteer.js')], check=True, capture_output=True, text=True, encoding='utf-8').stdout
 # a_ .. g_ are concatenated in name order into ONE script (they share top-level scope)
 app = '\n'.join(read(f) for f in sorted(glob.glob(os.path.join(ROOT, 'src/[a-z]_*.js'))))
 
@@ -43,10 +45,14 @@ else:
 out = (tpl.replace('/*MAPLIBRE_CSS*/', css)
           .replace('<!--SCRIPTS-->', scripts)
           .replace('/*WORLD*/', 'const WORLD_TOPO=' + world + ';')
+          .replace('/*GAZ*/', 'const GAZ=' + gaz + ';')
           .replace('/*APP*/', app))
 os.makedirs(os.path.dirname(dst), exist_ok=True)
 with open(dst, 'w', encoding='utf-8') as f:
     f.write(out)
+if mode == 'prod':  # static hosts (GitHub Pages, Netlify) serve index.html
+    with open(os.path.join(ROOT, 'dist/index.html'), 'w', encoding='utf-8') as f:
+        f.write(out)
 size = len(out.encode('utf-8'))
 print(f'{dst}  {size/1e6:.2f} MB')
 if size > 16e6:

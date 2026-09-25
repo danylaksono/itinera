@@ -1,104 +1,30 @@
-/* ================================================================
-   Part B: analytics context, filtering, aggregates
-   ================================================================ */
-const MODES = [
-  { k: 'walk', label: 'Walk and run', L: '#2B7A66', D: '#5FC4A6' },
-  { k: 'cycle', label: 'Cycling', L: '#6E962A', D: '#A9D26A' },
-  { k: 'road', label: 'Road', L: '#B07C12', D: '#E8B64A' },
-  { k: 'transit', label: 'Rail and transit', L: '#1D4E89', D: '#78A9E4' },
-  { k: 'flight', label: 'Flying', L: '#6A4A98', D: '#B99AEA' },
-  { k: 'other', label: 'Other', L: '#7A868C', D: '#8C999F' }
-];
-const MODE_IDX = Object.fromEntries(MODES.map((m, i) => [m.k, i]));
-const INKS_L = ['#B3322B', '#1D4E89', '#2B7A66', '#B07C12', '#6A4A98', '#7A5230', '#3E7C8C', '#9C3D6E'];
-const INKS_D = ['#F2806F', '#78A9E4', '#5FC4A6', '#E8B64A', '#B99AEA', '#D2A77E', '#79C3D3', '#E48DB8'];
-const HOUR_STOPS = [[0, '#27306A'], [4, '#3B3F8C'], [6.5, '#C9772C'], [9, '#D9A43A'], [13, '#B9B23C'], [17, '#D07A2E'], [19.5, '#B23F37'], [22, '#5A2E6A'], [24, '#27306A']];
-const HOUR_STOPS_D = [[0, '#6F7FE0'], [4, '#8D86E8'], [6.5, '#F0A55A'], [9, '#F2C66A'], [13, '#D7D46A'], [17, '#F0A05A'], [19.5, '#EF7A6B'], [22, '#B77CD6'], [24, '#6F7FE0']];
+/* Analytics context (places, roles, per-day indices), linked filtering and aggregates.
+   Every function takes the app state `st` explicitly: { sources, merged, mode, hidden, filter, ctx }. */
+import { standardDeviationalEllipse, point, featureCollection } from '@turf/turf';
+import { MIN, HOUR, DAY, hav, bisect, monthOfDay, browserOff } from './util.js';
+import { MODES, MODE_IDX } from './colors.js';
+import { countryAt, nearTown } from './geo.js';
 
-const S = {
-  sources: [], merged: null, mode: 'separate', colorBy: 'device', view: 'map', modeMetric: 'dist',
-  hidden: new Set(),
-  filter: { t0: null, t1: null, hours: null, dows: null, modes: null, place: null },
-  layers: { trails: true, heat: true, places: true, flows: false, ellipse: false, streets: false },
-  ctx: null, res: null, selPlace: null, openPlace: null,
-  play: { on: false, session: false, clock: null, speed: 46, skip: true, follow: false }
-};
-let nextSrcId = 0;
-const isDark = () => document.documentElement.dataset.dark === '1';
-const inkOf = src => (isDark() ? INKS_D : INKS_L)[src.colorIdx % INKS_L.length];
-const modeColor = k => MODES[MODE_IDX[k] ?? 5][isDark() ? 'D' : 'L'];
-function hourColor(h) {
-  const st = isDark() ? HOUR_STOPS_D : HOUR_STOPS;
-  for (let i = 1; i < st.length; i++) if (h <= st[i][0]) { const [a, ca] = st[i - 1], [b, cb] = st[i]; return d3.interpolateRgb(ca, cb)((h - a) / (b - a)); }
-  return st[0][1];
+export const activeSources = st => st.mode === 'combined' ? (st.merged ? [st.merged] : []) : st.sources;
+export const visibleSources = st => activeSources(st).filter(s => !st.hidden.has(s.id));
+export const srcById = (st, id) => st.mode === 'combined' ? st.merged : st.sources.find(s => s.id === id);
+
+/* UTC offset of the first active source near time t: the page's reference for "local" days */
+export function offNear(st, t) {
+  const s = activeSources(st)[0]; if (!s || !s.T.length) return browserOff(t);
+  return s.OF[Math.min(s.T.length - 1, bisect(s.T, t))];
 }
-const cssv = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-
-function activeSources() { return S.mode === 'combined' ? (S.merged ? [S.merged] : []) : S.sources; }
-function visibleSources() { return activeSources().filter(s => !S.hidden.has(s.id)); }
-function srcById(id) { return S.mode === 'combined' ? S.merged : S.sources.find(s => s.id === id); }
-
-/* ---------- countries ---------- */
-let WORLD = null;
-function initWorld() {
-  if (WORLD || typeof WORLD_TOPO === 'undefined') return;
-  const countries = topojson.feature(WORLD_TOPO, WORLD_TOPO.objects.countries).features;
-  for (const f of countries) f.bbox = turf.bbox(f);
-  WORLD = {
-    countries,
-    land: topojson.feature(WORLD_TOPO, WORLD_TOPO.objects.land),
-    borders: topojson.mesh(WORLD_TOPO, WORLD_TOPO.objects.countries, (a, b) => a !== b)
-  };
+export const dayToUtc = (st, day) => day * DAY - offNear(st, day * DAY) * MIN;
+export function rangeToDays(st) {
+  const f = st.filter;
+  if (f.t0 == null) return null;
+  return [Math.floor((f.t0 + offNear(st, f.t0) * MIN) / DAY), Math.floor((f.t1 - 1 + offNear(st, f.t1) * MIN) / DAY)];
 }
-const _ccache = new Map();
-function countryAt(lat, lon) {
-  if (!WORLD) return null;
-  const key = lat.toFixed(2) + ',' + lon.toFixed(2);
-  if (_ccache.has(key)) return _ccache.get(key);
-  let best = null;
-  const pt = [lon, lat];
-  for (const f of WORLD.countries) {
-    const b = f.bbox;
-    if (lon < b[0] || lon > b[2] || lat < b[1] || lat > b[3]) continue;
-    if (turf.booleanPointInPolygon(pt, f)) { best = f.properties.name; break; }
-  }
-  if (!best) { // coast: nearest bbox centre within ~30 km
-    let bd = 30000;
-    for (const f of WORLD.countries) {
-      const b = f.bbox;
-      if (lon < b[0] - .4 || lon > b[2] + .4 || lat < b[1] - .4 || lat > b[3] + .4) continue;
-      const geom = f.geometry;
-      const polys = geom.type === 'Polygon' ? [geom.coordinates] : geom.coordinates;
-      for (const poly of polys) for (const c of poly[0]) { const d = hav(lat, lon, c[1], c[0]); if (d < bd) { bd = d; best = f.properties.name; } }
-    }
-  }
-  _ccache.set(key, best);
-  return best;
-}
+export const playRange = st => [st.filter.t0 ?? st.ctx.t0, st.filter.t1 ?? st.ctx.t1];
 
-/* ---------- nearest town: GeoNames places over 15,000 people, built into the page (no network) ---------- */
-let GZ = null;
-function nearTown(lat, lon, maxD = 30000) {
-  if (!GZ) {
-    if (typeof GAZ === 'undefined') return null;
-    GZ = { names: GAZ.n.split('|'), grid: new Map() };
-    for (let i = 0; i < GZ.names.length; i++) {
-      const k = Math.floor(GAZ.c[2 * i] / 100) + ':' + Math.floor(GAZ.c[2 * i + 1] / 100);
-      if (!GZ.grid.has(k)) GZ.grid.set(k, []); GZ.grid.get(k).push(i);
-    }
-  }
-  let best = null, bd = maxD;
-  const gy = Math.floor(lat), gx = Math.floor(lon);
-  for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) for (const i of GZ.grid.get((gy + dy) + ':' + (gx + dx)) || []) {
-    const d = hav(lat, lon, GAZ.c[2 * i] / 100, GAZ.c[2 * i + 1] / 100);
-    if (d < bd) { bd = d; best = GZ.names[i]; }
-  }
-  return best;
-}
-
-/* ---------- context: places, roles, per-day indices ---------- */
-function loadNames() { try { return JSON.parse(localStorage.getItem('itinera-names') || '{}'); } catch (e) { return {}; } }
-function saveName(key, name) { try { const n = loadNames(); if (name) n[key] = name; else delete n[key]; localStorage.setItem('itinera-names', JSON.stringify(n)); } catch (e) { } }
+/* ---------- place names kept in the browser ---------- */
+export function loadNames() { try { return JSON.parse(localStorage.getItem('itinera-names') || '{}'); } catch (e) { return {}; } }
+export function saveName(key, name) { try { const n = loadNames(); if (name) n[key] = name; else delete n[key]; localStorage.setItem('itinera-names', JSON.stringify(n)); } catch (e) { } }
 const placeKey = p => p.lat.toFixed(3) + ',' + p.lon.toFixed(3);
 
 /* Home and work can change over time (moving house, country or job). Each local month, the candidate
@@ -130,13 +56,13 @@ function rolePeriods(byMon, firstVisits, offOf, minH) {
   }
   return out;
 }
-function homeAt(t, ctx = S.ctx) {
+export function homeAt(t, ctx) {
   const k = bisect(ctx.homeT0, t + 1) - 1;
   return k >= 0 && t < ctx.homes[k].t1 ? ctx.homes[k].place : -1;
 }
 
-function buildContext() {
-  const srcs = activeSources();
+export function buildContext(st) {
+  const srcs = activeSources(st);
   const ctx = { places: [], home: -1, work: -1 };
   const allV = [], allT = [];
   for (const s of srcs) { allV.push(...s.visits); allT.push(...s.trips); }
@@ -255,7 +181,7 @@ function buildContext() {
   ctx.day0 = Math.floor((t0 + offRef * MIN) / DAY) - 1;
   ctx.day1 = Math.floor((t1 + offRef * MIN) / DAY) + 1;
   ctx.nDays = ctx.day1 - ctx.day0 + 1;
-  markDuplicates(ctx);
+  markDuplicates(st, ctx);
   ctx.homeByDay = Int32Array.from({ length: ctx.nDays }, (_, d) => homeAt((ctx.day0 + d) * DAY + 12 * HOUR - offRef * MIN, ctx));
   ctx.mon0 = monthOfDay(ctx.day0); ctx.mon1 = monthOfDay(ctx.day1);
   ctx.wk0 = Math.floor((ctx.day0 + 3) / 7); ctx.wk1 = Math.floor((ctx.day1 + 3) / 7);
@@ -273,11 +199,10 @@ function buildContext() {
   const mv = [];
   for (const x of iv) { const p = mv[mv.length - 1]; if (p && x[0] <= p[1] + 10 * MIN) p[1] = Math.max(p[1], x[1]); else mv.push([x[0], x[1]]); }
   ctx.moving = mv; ctx.movingStarts = mv.map(x => x[0]);
-  S.ctx = ctx;
-  if (S.filter.place != null && S.filter.place >= places.length) S.filter.place = null;
+  return ctx;
 }
 
-function defaultLabel(p) {
+export function defaultLabel(p) {
   if (p.custom || p.name) return p.custom || p.name;
   if (p.role) return p.roleSpan ? `${p.role}${p.town ? ', ' + p.town : ''} (${p.roleSpan})` : p.role;
   return `Place ${p.rank}${p.town || p.country ? ', ' + (p.town || p.country) : ''}`;
@@ -289,12 +214,12 @@ function defaultLabel(p) {
    it is carried, so a trip is dropped only when a higher-ranked device was also moving (a phone left
    at home does not cancel a run recorded by a watch). Devices that cover different periods add up.
    Maps, the cube and the per-device timeline rows still show every device. */
-function markDuplicates(ctx = S.ctx) {
-  const all = activeSources();
+export function markDuplicates(st, ctx) {
+  const all = activeSources(st);
   for (const s of all) { for (const v of s.visits) v.dup = false; for (const t of s.trips) t.dup = false; }
   // the main device covers the most days; ties go to the one with more records
   const days = s => s._days ??= new Set(Array.from(s.T, (t, i) => Math.floor((t + s.OF[i] * MIN) / DAY))).size;
-  const srcs = all.filter(s => !S.hidden.has(s.id)).sort((a, b) => days(b) - days(a) || b.T.length - a.T.length);
+  const srcs = all.filter(s => !st.hidden.has(s.id)).sort((a, b) => days(b) - days(a) || b.T.length - a.T.length);
   // sorted, disjoint [t0, t1] intervals from higher-ranked devices: any record (stays and trips), and moving only
   let any = [], moving = [];
   const merge = (cover, add) => {
@@ -312,10 +237,10 @@ function markDuplicates(ctx = S.ctx) {
   if (ctx) ctx.dupCount = all.reduce((a, s) => a + s.visits.filter(v => v.dup).length + s.trips.filter(t => t.dup).length, 0);
 }
 
-/* ---------- filtering ---------- */
-function passes(it, except, isTrip) {
-  const f = S.filter;
-  if (S.hidden.has(it.src)) return false;
+/* ---------- filtering: each view ignores its own filter (crossfilter style) ---------- */
+export function passes(st, it, except, isTrip) {
+  const f = st.filter;
+  if (st.hidden.has(it.src)) return false;
   if (except !== 'time' && f.t0 != null && (it.t1 < f.t0 || it.t0 > f.t1)) return false;
   if (except !== 'rhythm') {
     if (f.hours && !f.hours.has(it.h)) return false;
@@ -328,11 +253,6 @@ function passes(it, except, isTrip) {
   }
   return true;
 }
-function clipDur(v) {
-  const f = S.filter;
-  if (f.t0 == null) return v.dur;
-  return Math.max(0, Math.min(v.t1, f.t1) - Math.max(v.t0, f.t0));
-}
 function rog(visits, durFn) {
   let W = 0, sx = 0, sy = 0;
   for (const v of visits) { const w = durFn(v); if (!w) continue; W += w; sx += w * v.lon; sy += w * v.lat; }
@@ -343,17 +263,18 @@ function rog(visits, durFn) {
   return Math.sqrt(s2 / W);
 }
 
-function compute() {
-  const ctx = S.ctx; if (!ctx) return null;
-  const srcs = activeSources();
+export function compute(st) {
+  const ctx = st.ctx; if (!ctx) return null;
+  const srcs = activeSources(st), f = st.filter;
   const res = {};
   const nM = ctx.mon1 - ctx.mon0 + 1, nW = ctx.wk1 - ctx.wk0 + 1, nD = ctx.nDays;
+  const clipDur = v => f.t0 == null ? v.dur : Math.max(0, Math.min(v.t1, f.t1) - Math.max(v.t0, f.t0));
 
   // ---------- all filters
   const V = [], Tr = [];
   for (const s of srcs) {
-    for (const v of s.visits) if (passes(v, null, false)) V.push(v);
-    for (const t of s.trips) if (passes(t, null, true)) Tr.push(t);
+    for (const v of s.visits) if (passes(st, v, null, false)) V.push(v);
+    for (const t of s.trips) if (passes(st, t, null, true)) Tr.push(t);
   }
   res.V = V; res.T = Tr;
   const V1 = V.filter(v => !v.dup), T1 = Tr.filter(t => !t.dup); // one person: see markDuplicates()
@@ -367,15 +288,15 @@ function compute() {
   k.rog = rog(V1, clipDur);
   // share of stay time at the home of that time; months with no known home are left out
   let tot = 0, hm = 0;
-  for (const v of V1) { const h = homeAt(v.t0); if (h < 0) continue; const d = clipDur(v); tot += d; if (v.place === h) hm += d; }
+  for (const v of V1) { const h = homeAt(v.t0, ctx); if (h < 0) continue; const d = clipDur(v); tot += d; if (v.place === h) hm += d; }
   k.home = tot ? hm / tot : null;
   res.kpi = k;
 
   // ---------- except time: monthly/daily/weekly series
   const Vx = [], Tx = [];
   for (const s of srcs) {
-    for (const v of s.visits) if (!v.dup && passes(v, 'time', false)) Vx.push(v);
-    for (const t of s.trips) if (!t.dup && passes(t, 'time', true)) Tx.push(t);
+    for (const v of s.visits) if (!v.dup && passes(st, v, 'time', false)) Vx.push(v);
+    for (const t of s.trips) if (!t.dup && passes(st, t, 'time', true)) Tx.push(t);
   }
   const mDist = new Float64Array(nM), mDays = new Map(), mNew = new Float64Array(nM), mCountry = new Map(), mRogV = new Map(), mHome = new Float64Array(nM), mTot = new Float64Array(nM);
   for (const t of Tx) { const m = t.mon - ctx.mon0; if (m >= 0 && m < nM) mDist[m] += t.dist; const key = t.mon; if (!mDays.has(key)) mDays.set(key, new Set()); mDays.get(key).add(t.day); }
@@ -387,7 +308,7 @@ function compute() {
     if (p && p.firstMon === v.mon && !seenPlace.has(v.place)) { seenPlace.add(v.place); mNew[m]++; }
     if (p?.country) { if (!mCountry.has(v.mon)) mCountry.set(v.mon, new Set()); mCountry.get(v.mon).add(p.country); }
     if (!mRogV.has(v.mon)) mRogV.set(v.mon, []); mRogV.get(v.mon).push(v);
-    const h = homeAt(v.t0); if (h >= 0) { mTot[m] += v.dur; if (v.place === h) mHome[m] += v.dur; }
+    const h = homeAt(v.t0, ctx); if (h >= 0) { mTot[m] += v.dur; if (v.place === h) mHome[m] += v.dur; }
   }
   const mon = i => ctx.mon0 + i;
   res.monthly = {
@@ -424,15 +345,14 @@ function compute() {
   // ---------- except rhythm: 7x24 moving minutes, averaged over the days of each weekday that have records
   const R = new Float64Array(7 * 24);
   {
-    const f = S.filter;
     const a = f.t0 ?? ctx.t0, b = f.t1 ?? ctx.t1;
-    const dr = rangeToDays();
+    const dr = rangeToDays(st);
     for (const s of srcs) {
-      if (S.hidden.has(s.id)) continue;
+      if (st.hidden.has(s.id)) continue;
       const cov = ctx.cover.get(s.id), nDow = new Float64Array(7), Rs = new Float64Array(7 * 24);
       for (let d = 0; d < cov.length; d++) { const day = ctx.day0 + d; if (cov[d] && (!dr || (day >= dr[0] && day <= dr[1]))) nDow[(day + 3) % 7]++; }
       for (const t of s.trips) {
-        if (!passes(t, 'rhythm', true)) continue;
+        if (!passes(st, t, 'rhythm', true)) continue;
         let x = Math.max(t.t0, a); const end = Math.min(t.t1, b);
         const L = t.off * MIN;
         let guard = 0;
@@ -446,13 +366,13 @@ function compute() {
       }
       for (let i = 0; i < R.length; i++) R[i] += Rs[i] / Math.max(1, nDow[Math.floor(i / 24)]);
     }
-    if (S.mode === 'separate') { const n = Math.max(1, visibleSources().length); for (let i = 0; i < R.length; i++) R[i] /= n; }
+    if (st.mode === 'separate') { const n = Math.max(1, visibleSources(st).length); for (let i = 0; i < R.length; i++) R[i] /= n; }
   }
   res.rhythm = R;
 
   // ---------- except modes
   const md = MODES.map(m => ({ k: m.k, dist: 0, dur: 0, n: 0 }));
-  for (const s of srcs) for (const t of s.trips) { if (t.dup || !passes(t, 'modes', true)) continue; const m = md[MODE_IDX[t.mode] ?? 5]; m.dist += t.dist; m.dur += t.dur; m.n++; }
+  for (const s of srcs) for (const t of s.trips) { if (t.dup || !passes(st, t, 'modes', true)) continue; const m = md[MODE_IDX[t.mode] ?? 5]; m.dist += t.dist; m.dur += t.dur; m.n++; }
   res.modes = md;
 
   // ---------- places (all filters)
@@ -462,7 +382,6 @@ function compute() {
     if (!o) { o = { i: v.place, dur: 0, n: 0, arr: new Float32Array(24), srcs: new Set(), first: Infinity, last: -Infinity }; pd.set(v.place, o); }
     o.dur += clipDur(v); o.n++; o.arr[v.h]++; o.srcs.add(v.src); o.first = Math.min(o.first, v.t0); o.last = Math.max(o.last, v.t1);
   }
-  // keep the selected place in the list even when filters remove it
   res.places = [...pd.values()].sort((a, b) => b.dur - a.dur);
   // ---------- flows
   const fl = new Map();
@@ -474,16 +393,13 @@ function compute() {
   res.flows = [...fl.entries()].map(([k, n]) => { const [a, b] = k.split('-').map(Number); return { a, b, n }; }).sort((x, y) => y.n - x.n).slice(0, 300);
   // ---------- activity-space ellipses
   res.ellipses = [];
-  if (typeof turf !== 'undefined') {
-    const bySrc = new Map();
-    for (const v of V) { if (!bySrc.has(v.src)) bySrc.set(v.src, new Map()); const m = bySrc.get(v.src); m.set(v.place, (m.get(v.place) || 0) + clipDur(v)); }
-    for (const [sid, m] of bySrc) {
-      if (m.size < 3) continue;
-      const pts = [...m.entries()].map(([pi, w]) => turf.point([ctx.places[pi].lon, ctx.places[pi].lat], { w: w / HOUR }));
-      try { const e = turf.standardDeviationalEllipse(turf.featureCollection(pts), { weight: 'w', steps: 72 }); e.properties = { src: sid }; res.ellipses.push(e); } catch (e) { }
-    }
+  const bySrc = new Map();
+  for (const v of V) { if (!bySrc.has(v.src)) bySrc.set(v.src, new Map()); const m = bySrc.get(v.src); m.set(v.place, (m.get(v.place) || 0) + clipDur(v)); }
+  for (const [sid, m] of bySrc) {
+    if (m.size < 3) continue;
+    const pts = [...m.entries()].map(([pi, w]) => point([ctx.places[pi].lon, ctx.places[pi].lat], { w: w / HOUR }));
+    try { const e = standardDeviationalEllipse(featureCollection(pts), { weight: 'w', steps: 72 }); e.properties = { src: sid }; res.ellipses.push(e); } catch (e) { }
   }
-  S.res = res;
   return res;
 }
 
@@ -506,7 +422,7 @@ function posAt(s, t, maxGap = 45 * MIN) {
   const f = dt ? (t - T[a]) / dt : 0;
   return [s.LA[a] + (s.LA[i] - s.LA[a]) * f, s.LO[a] + (s.LO[i] - s.LO[a]) * f];
 }
-function togetherness(a, b) {
+export function togetherness(a, b) {
   const t0 = Math.max(a.t0, b.t0), t1 = Math.min(a.t1, b.t1);
   if (!(t1 > t0)) return null;
   const step = Math.max(10 * MIN, (t1 - t0) / 20000);
@@ -517,4 +433,15 @@ function togetherness(a, b) {
     both++; if (hav(p[0], p[1], q[0], q[1]) < 300) near++;
   }
   return both > 12 ? { pct: near / both, hours: both * step / HOUR } : null;
+}
+
+/* interpolated position of a device at time t, for the playback heads */
+export function headAt(s, t) {
+  const T = s.T, n = T.length; if (!n) return null;
+  const i = bisect(T, t);
+  if (i === 0 || i >= n) return null;
+  const a = i - 1, dt = T[i] - T[a];
+  const f = dt ? (t - T[a]) / dt : 0;
+  const stale = Math.min(t - T[a], T[i] - t) > 60 * MIN && hav(s.LA[a], s.LO[a], s.LA[i], s.LO[i]) > 200;
+  return { lat: s.LA[a] + (s.LA[i] - s.LA[a]) * f, lon: s.LO[a] + (s.LO[i] - s.LO[a]) * f, stale, i };
 }

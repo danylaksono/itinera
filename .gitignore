@@ -1,5 +1,4 @@
 node_modules/
 dist/
 tests/out/
-__pycache__/
 data_sample/

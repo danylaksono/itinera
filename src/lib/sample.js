@@ -1,9 +1,10 @@
-/* ================================================================
-   Part F: sample data — a made-up year in Lisbon.
+/* Sample data: a made-up year in Lisbon.
    Emits three real-format files and runs them through the parsers:
-   Android Timeline.json (phone), Records.json (work phone), runs.gpx (watch)
-   ================================================================ */
-function makeSample() {
+   Android Timeline.json (phone), Records.json (work phone), runs.gpx (watch). */
+import { MIN, HOUR, DAY, hav, bisect, clamp } from './util.js';
+import { detectAndParse } from './parse.js';
+
+export function makeSample() {
   let seed = 20250106;
   const R = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
   const rnd = (a, b) => a + (b - a) * R();

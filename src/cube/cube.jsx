@@ -1,45 +1,47 @@
-/* ================================================================
-   Part E: space-time cube (three.js)
-   Floor = current map view, height = selected time range.
-   ================================================================ */
-const Cube = (() => {
-  let ok = null, renderer, scene, camera, controls, root, el, cap, lblBox;
-  let built = false, timer = null, rafPending = false, clockT = null;
-  let geo = null; // { toX, toZ, toY, X, Z, H, a, b, stays:[...], inst }
+/* Space-time cube (three.js). Floor = current map view (web mercator, longest side 100 units),
+   height = selected time range (72 units). Renders on demand only.
+   createCube(el, lblBox, setCaption) returns { build, schedule, setClock, show, destroy }. */
+import * as THREE from 'three';
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { color as d3color, scaleUtc } from 'd3';
+import { MIN, DAY, RAD, clamp, fmtDay, fmtDur, fmtLocal } from '../lib/util.js';
+import { cssv, modeColor, hourColor, trackColor } from '../lib/colors.js';
+import { WORLD } from '../lib/geo.js';
+import { activeSources, visibleSources, srcById, playRange, offNear, headAt } from '../lib/analytics.js';
+import { getState } from '../store.js';
+import { getMap, mapReady, viewBounds, boundsOf } from '../map/mapView.jsx';
+import { showTip, hideTip } from '../tip.jsx';
+
+export function createCube(el, lblBox, setCaption) {
+  let renderer;
+  try { renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: false }); }
+  catch (e) { setCaption({ error: 'This browser cannot show 3D graphics (WebGL is off).' }); return null; }
+  renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+  el.insertBefore(renderer.domElement, lblBox); // labels stay above the canvas
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(38, 1, 1, 4000);
+  camera.position.set(118, 112, 150);
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = false;
+  controls.target.set(0, 32, 0);
+  controls.maxPolarAngle = Math.PI * 0.98;
+  controls.minDistance = 30; controls.maxDistance = 900;
+  controls.addEventListener('change', render);
+  const ray = new THREE.Raycaster();
+  let root = null, built = false, timer = null, rafPending = false, clockT = null, dead = false;
+  let geo = null; // { toX, toZ, toY, X, Z, H, a, b, stays, inst }
   let clockGrp = null, heads = [];
   const labels = [];
-  const ray = typeof THREE !== 'undefined' ? new THREE.Raycaster() : null;
+  const visible = () => getState().view !== 'map';
 
-  function init() {
-    if (ok !== null) return ok;
-    el = $('#cube'); cap = $('#cubeCap');
-    if (typeof THREE === 'undefined' || !THREE.OrbitControls) { ok = false; cap.innerHTML = '<b>Space-time cube</b><br>The 3D library did not load, so this view is not available.'; return ok; }
-    try {
-      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: false });
-    } catch (e) { ok = false; cap.innerHTML = '<b>Space-time cube</b><br>This browser cannot show 3D graphics (WebGL is off).'; return ok; }
-    renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
-    el.appendChild(renderer.domElement);
-    lblBox = document.createElement('div');
-    lblBox.style.cssText = 'position:absolute;inset:0;pointer-events:none;overflow:hidden';
-    el.appendChild(lblBox);
-    scene = new THREE.Scene();
-    camera = new THREE.PerspectiveCamera(38, 1, 1, 4000);
-    camera.position.set(118, 112, 150);
-    controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = false;
-    controls.target.set(0, 32, 0);
-    controls.maxPolarAngle = Math.PI * 0.98;
-    controls.minDistance = 30; controls.maxDistance = 900;
-    controls.addEventListener('change', render);
-    new ResizeObserver(() => { if (S.view !== 'map') { resize(); render(); } }).observe(el);
-    renderer.domElement.addEventListener('pointermove', onHover);
-    renderer.domElement.addEventListener('pointerleave', hideTip);
-    renderer.domElement.addEventListener('dblclick', () => { camera.position.set(118, 112, 150); if (geo) fitCamera(); else controls.update(); render(); });
-    ok = true;
-    return ok;
-  }
+  const ro = new ResizeObserver(() => { if (visible()) { resize(); render(); } });
+  ro.observe(el);
+  const onDbl = () => { camera.position.set(118, 112, 150); if (geo) fitCamera(); else controls.update(); render(); };
+  renderer.domElement.addEventListener('pointermove', onHover);
+  renderer.domElement.addEventListener('pointerleave', hideTip);
+  renderer.domElement.addEventListener('dblclick', onDbl);
+
   function resize() {
-    if (!ok) return;
     const w = el.clientWidth, h = el.clientHeight;
     if (!w || !h) return;
     renderer.setSize(w, h, false);
@@ -62,12 +64,12 @@ const Cube = (() => {
   function disposeTree(o) {
     o.traverse(c => { c.geometry?.dispose?.(); if (c.material) (Array.isArray(c.material) ? c.material : [c.material]).forEach(m => m.dispose()); });
   }
-  const col = c => new THREE.Color(d3.color(c).formatHex());
+  const col = c => new THREE.Color(d3color(c).formatHex());
 
-  function extent() {
-    const b = S.view === 'split' && mapReady ? map.getBounds() : viewBounds();
+  function extent(st) {
+    const b = st.view === 'split' && mapReady() ? getMap().getBounds() : viewBounds();
     if (b && b.getEast() - b.getWest() < 300) return [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
-    const pl = S.ctx.places; if (!pl.length) return [-10, 35, 10, 45];
+    const pl = st.ctx.places; if (!pl.length) return [-10, 35, 10, 45];
     const bb = boundsOf(pl.map(p => [p.lon, p.lat]));
     return [bb[0][0], bb[0][1], bb[1][0], bb[1][1]];
   }
@@ -75,21 +77,23 @@ const Cube = (() => {
   const my = lat => { const s = Math.sin(clamp(lat, -85, 85) * RAD); return 0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI); };
 
   function build() {
-    if (!init() || !S.ctx || !S.res) return;
+    const st = getState();
+    if (dead || !st.ctx || !st.res) return;
     resize();
     if (root) { scene.remove(root); disposeTree(root); }
-    labels.length = 0; lblBox.innerHTML = '';
+    labels.length = 0; lblBox.replaceChildren();
     root = new THREE.Group(); scene.add(root);
-    const [w, s, e, n] = extent();
+    const [w, s, e, n] = extent(st);
     const x0 = mx(w), x1 = mx(e), y0 = my(n), y1 = my(s);
     const k = 100 / Math.max(x1 - x0, y1 - y0);
     const X = (x1 - x0) * k, Z = (y1 - y0) * k, H = 72;
-    const [a, b] = playRange();
+    const [a, b] = playRange(st);
     const toX = lon => (mx(lon) - x0) * k - X / 2, toZ = lat => (my(lat) - y0) * k - Z / 2;
     const toY = t => (t - a) / Math.max(1, b - a) * H;
     const inside = (lat, lon) => lon >= w && lon <= e && lat >= s && lat <= n;
     geo = { toX, toZ, toY, X, Z, H, a, b };
-    const ink = cssv('--ink'), ink3 = cssv('--ink-3'), rule = cssv('--rule');
+    const ink = cssv('--ink'), rule = cssv('--rule');
+    renderer.localClippingEnabled = true;
 
     // ---- frame: floor, edges, land outline
     const floor = new THREE.Mesh(new THREE.PlaneGeometry(X, Z), new THREE.MeshBasicMaterial({ color: col(cssv('--land')), side: THREE.DoubleSide }));
@@ -105,16 +109,16 @@ const Cube = (() => {
       if (pos.length) {
         const bg = new THREE.BufferGeometry(); bg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
         const ls = new THREE.LineSegments(bg, new THREE.LineBasicMaterial({ color: col(cssv('--border-map')) }));
-        const clipPlanes = [new THREE.Plane(new THREE.Vector3(1, 0, 0), X / 2), new THREE.Plane(new THREE.Vector3(-1, 0, 0), X / 2), new THREE.Plane(new THREE.Vector3(0, 0, 1), Z / 2), new THREE.Plane(new THREE.Vector3(0, 0, -1), Z / 2)];
-        ls.material.clippingPlanes = clipPlanes; renderer.localClippingEnabled = true;
+        ls.material.clippingPlanes = [new THREE.Plane(new THREE.Vector3(1, 0, 0), X / 2), new THREE.Plane(new THREE.Vector3(-1, 0, 0), X / 2), new THREE.Plane(new THREE.Vector3(0, 0, 1), Z / 2), new THREE.Plane(new THREE.Vector3(0, 0, -1), Z / 2)];
         root.add(ls);
       }
     }
     // ---- trips (filtered) as lines with vertex colour + ground shadow
-    const colorOf = t => S.colorBy === 'mode' ? modeColor(t.mode) : S.colorBy === 'hour' ? hourColor(t.hod) : trackColor(srcById(t.src) || activeSources()[0]);
+    const fallback = activeSources(st)[0];
+    const colorOf = t => st.colorBy === 'mode' ? modeColor(t.mode) : st.colorBy === 'hour' ? hourColor(t.hod) : trackColor(st, srcById(st, t.src) || fallback);
     const P = [], C = [], SH = [];
     let segs = 0, nTrips = 0;
-    const trips = S.res.T.filter(t => t.t1 >= a && t.t0 <= b);
+    const trips = st.res.T.filter(t => t.t1 >= a && t.t0 <= b);
     const MAXSEG = 350000;
     for (const t of trips) {
       const path = t.path; if (path.length < 2) continue;
@@ -134,7 +138,6 @@ const Cube = (() => {
       if (segs > MAXSEG) break;
     }
     const clip = [new THREE.Plane(new THREE.Vector3(1, 0, 0), X / 2 + 0.01), new THREE.Plane(new THREE.Vector3(-1, 0, 0), X / 2 + 0.01), new THREE.Plane(new THREE.Vector3(0, 0, 1), Z / 2 + 0.01), new THREE.Plane(new THREE.Vector3(0, 0, -1), Z / 2 + 0.01), new THREE.Plane(new THREE.Vector3(0, 1, 0), 0.01), new THREE.Plane(new THREE.Vector3(0, -1, 0), H + 0.01)];
-    renderer.localClippingEnabled = true;
     if (P.length) {
       const g1 = new THREE.BufferGeometry();
       g1.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
@@ -145,7 +148,7 @@ const Cube = (() => {
       root.add(new THREE.LineSegments(g2, new THREE.LineBasicMaterial({ color: col(ink), transparent: true, opacity: 0.16, clippingPlanes: clip })));
     }
     // ---- stays as vertical cylinders (instanced)
-    let stays = S.res.V.filter(v => v.t1 >= a && v.t0 <= b && inside(v.lat, v.lon));
+    let stays = st.res.V.filter(v => v.t1 >= a && v.t0 <= b && inside(v.lat, v.lon));
     if (stays.length > 8000) stays = stays.slice().sort((p, q) => q.dur - p.dur).slice(0, 8000);
     geo.stays = stays;
     if (stays.length) {
@@ -154,25 +157,25 @@ const Cube = (() => {
       const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.82 });
       const inst = new THREE.InstancedMesh(cyl, mat, stays.length);
       const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), ps = new THREE.Vector3();
-      const homes = S.ctx.homeSet;
+      const homes = st.ctx.homeSet;
       stays.forEach((v, i) => {
         const ya = toY(Math.max(v.t0, a)), yb = toY(Math.min(v.t1, b));
         const hh = Math.max(0.12, yb - ya);
         const rr = homes.has(v.place) ? r * 1.25 : r;
         ps.set(toX(v.lon), ya + hh / 2, toZ(v.lat)); sc.set(rr, hh, rr);
         m4.compose(ps, q, sc); inst.setMatrixAt(i, m4);
-        const c = S.colorBy === 'device' ? col(trackColor(srcById(v.src) || activeSources()[0])) : col(homes.has(v.place) ? ink : cssv('--ink-2'));
+        const c = st.colorBy === 'device' ? col(trackColor(st, srcById(st, v.src) || fallback)) : col(homes.has(v.place) ? ink : cssv('--ink-2'));
         inst.setColorAt(i, c);
       });
       inst.instanceMatrix.needsUpdate = true; if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
       root.add(inst); geo.inst = inst;
     } else geo.inst = null;
     // ---- place labels on the floor (top places inside the view)
-    const inView = S.res.places.map(o => S.ctx.places[o.i]).filter(p => inside(p.lat, p.lon)).slice(0, 6);
+    const inView = st.res.places.map(o => st.ctx.places[o.i]).filter(p => inside(p.lat, p.lon)).slice(0, 6);
     for (const p of inView) addLabel(new THREE.Vector3(toX(p.lon), 0, toZ(p.lat)), p.label, 'place');
     // ---- time ticks on the back-left edge
-    const off = offNear(a);
-    const sc = d3.scaleUtc().domain([a + off * MIN, b + off * MIN]).range([0, H]);
+    const off = offNear(st, a);
+    const sc = scaleUtc().domain([a + off * MIN, b + off * MIN]).range([0, H]);
     const ticks = sc.ticks(6), fmt = sc.tickFormat(6);
     const tp = [];
     for (const tk of ticks) {
@@ -191,16 +194,15 @@ const Cube = (() => {
     const pe = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(X, Z)), new THREE.LineBasicMaterial({ color: col(ink), transparent: true, opacity: 0.55 }));
     pe.rotation.x = -Math.PI / 2; clockGrp.add(pe);
     root.add(clockGrp);
-    heads = visibleSources().map(src => {
-      const m = new THREE.Mesh(new THREE.SphereGeometry(1.4, 16, 12), new THREE.MeshBasicMaterial({ color: col(trackColor(src)) }));
+    heads = visibleSources(st).map(src => {
+      const m = new THREE.Mesh(new THREE.SphereGeometry(1.4, 16, 12), new THREE.MeshBasicMaterial({ color: col(trackColor(st, src)) }));
       m.visible = false; m.userData.src = src; root.add(m);
-      const stem = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: col(trackColor(src)), transparent: true, opacity: 0.5 }));
+      const stem = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: col(trackColor(st, src)), transparent: true, opacity: 0.5 }));
       stem.visible = false; root.add(stem); m.userData.stem = stem;
       return m;
     });
-    // ---- caption
-    const d0 = Math.floor((a + off * MIN) / DAY), d1 = Math.floor((b + offNear(b) * MIN) / DAY);
-    cap.innerHTML = `<b>Space-time cube.</b> Time goes up, from ${fmtDay(d0)} at the floor to ${fmtDay(d1)} at the top. The floor is the ${S.view === 'split' ? 'map view on the left' : 'last map view'}. Columns are stays, lines are trips (${nTrips.toLocaleString('en-GB')} shown). Drag to turn, scroll to zoom, double-click to reset.`;
+    const d0 = Math.floor((a + off * MIN) / DAY), d1 = Math.floor((b + offNear(st, b) * MIN) / DAY);
+    setCaption({ from: fmtDay(d0), to: fmtDay(d1), split: st.view === 'split', nTrips });
     fitCamera();
     built = true;
     placeClock();
@@ -208,9 +210,8 @@ const Cube = (() => {
   }
   function addLabel(v, text, kind) {
     const d = document.createElement('div');
-    d.className = 'cube-lbl';
+    d.className = 'cube-lbl' + (kind === 'place' ? ' is-place' : '');
     d.textContent = text;
-    if (kind === 'place') { d.style.transform = 'translate(6px,-50%)'; d.style.color = cssv('--ink'); d.style.fontWeight = '600'; d.style.textShadow = `0 0 3px ${cssv('--panel-2')}, 0 0 3px ${cssv('--panel-2')}`; }
     lblBox.appendChild(d);
     labels.push({ v, d });
   }
@@ -237,37 +238,41 @@ const Cube = (() => {
       const inBox = Math.abs(x) <= geo.X / 2 && Math.abs(z) <= geo.Z / 2;
       m.visible = inBox; m.position.set(x, y, z);
       m.material.opacity = hd.stale ? 0.4 : 1; m.material.transparent = hd.stale;
-      const st = m.userData.stem; st.visible = inBox;
-      if (inBox) { const pa = st.geometry.attributes.position; pa.setXYZ(0, x, 0, z); pa.setXYZ(1, x, y, z); pa.needsUpdate = true; st.geometry.computeBoundingSphere(); }
+      const stm = m.userData.stem; stm.visible = inBox;
+      if (inBox) { const pa = stm.geometry.attributes.position; pa.setXYZ(0, x, 0, z); pa.setXYZ(1, x, y, z); pa.needsUpdate = true; stm.geometry.computeBoundingSphere(); }
     }
   }
   function render() {
-    if (!ok || S.view === 'map') return;
-    if (rafPending) return;
+    if (dead || !visible() || rafPending) return;
     rafPending = true;
     requestAnimationFrame(() => {
       rafPending = false;
+      if (dead) return;
       renderer.render(scene, camera);
       placeLabels();
     });
   }
   function onHover(ev) {
-    if (!geo?.inst || !ray) return;
+    if (!geo?.inst) return;
     const r = renderer.domElement.getBoundingClientRect();
     const v = new THREE.Vector2((ev.clientX - r.left) / r.width * 2 - 1, -(ev.clientY - r.top) / r.height * 2 + 1);
     ray.setFromCamera(v, camera);
     const hit = ray.intersectObject(geo.inst, false)[0];
     if (!hit) { hideTip(); return; }
     const s = geo.stays[hit.instanceId]; if (!s) return;
-    const p = S.ctx.places[s.place];
+    const p = getState().ctx.places[s.place];
     const a = fmtLocal(s.t0, s.off), b = fmtLocal(s.t1, s.off);
-    showTip(ev, `<b>${esc(p?.label || 'Stay')}</b><br>${a.date}, ${a.time}<br>to ${b.date === a.date ? '' : b.date + ', '}${b.time} (${fmtDur(s.dur)})`);
+    showTip(ev, <><b>{p?.label || 'Stay'}</b><br />{a.date}, {a.time}<br />to {b.date === a.date ? '' : b.date + ', '}{b.time} ({fmtDur(s.dur)})</>);
   }
   return {
-    init, build,
-    schedule() { if (S.view === 'map') return; clearTimeout(timer); timer = setTimeout(build, 220); },
-    setClock(t) { clockT = t; if (!built || S.view === 'map') return; placeClock(); render(); },
-    show(on) { if (!on) { hideTip(); return; } if (!init()) return; resize(); build(); },
-    rebuild() { if (built && S.view !== 'map') build(); else built = false; }
+    build,
+    schedule() { if (!visible()) return; clearTimeout(timer); timer = setTimeout(build, 220); },
+    setClock(t) { clockT = t; if (!built || !visible()) return; placeClock(); render(); },
+    show(on) { if (!on) { hideTip(); return; } resize(); build(); },
+    destroy() {
+      dead = true; clearTimeout(timer); ro.disconnect(); controls.dispose();
+      if (root) disposeTree(root);
+      renderer.dispose(); renderer.forceContextLoss(); renderer.domElement.remove(); lblBox.replaceChildren();
+    }
   };
-})();
+}

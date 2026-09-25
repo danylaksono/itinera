@@ -5,11 +5,11 @@ your own movement: a map, a space-time cube, a calendar, a weekly rhythm grid, t
 bars, a ranked list of places and a playback animation. Select something in one view and
 the others filter to match.
 
-**Your data never leaves your browser.** Itinera is one static HTML page with no server and
-no upload. Files are read with the browser's File API. When you close the tab, the data is
+**Your data never leaves your browser.** Itinera is a static site with no server and no
+upload. Files are read with the browser's File API. When you close the tab, the data is
 gone. The page carries a Content-Security-Policy, so the browser itself blocks any attempt
-to send data elsewhere. The only outgoing requests it allows are the pinned library scripts,
-the font, and the optional street-map tiles (see [Deploy](#deploy)).
+to send data elsewhere. Scripts load only from the site itself. The only other requests it
+allows are the font and the optional street-map tiles (see [Deploy](#deploy)).
 
 ## What you can do
 
@@ -78,42 +78,36 @@ readers as real files.
 
 ## Build
 
-You need Node.js (for the pinned libraries) and Python 3 (for the build script).
+You need Node.js 22. Itinera is a React app built with Vite.
 
 ```bash
 npm install
-npm run build        # writes dist/index.html (and a copy, dist/itinera.html)
+npm run dev          # development server with hot reload
+npm run build        # writes the site to dist/
+npm run preview      # serves dist/ locally
 ```
 
-The build puts `src/` together into one self-contained HTML file of about 1.5 MB. The
-following are inlined:
+The build bundles every library from npm at pinned versions: React, MapLibre GL, D3,
+three.js, anime.js, Turf, topojson-client and JSZip. There are no CDN scripts. It also
+bundles, as chunks that load only after you open data:
 
-- the MapLibre stylesheet;
 - the world outline map (Natural Earth, via `world-atlas`);
-- a gazetteer of towns with over 15,000 people. It comes from GeoNames via
-  `all-the-cities`, and `tools/gazetteer.js` makes it.
+- a gazetteer of towns with over 15,000 people, from GeoNames via `all-the-cities`. It is
+  made at build time in `vite.config.js`.
 
-The libraries load from jsDelivr and cdnjs at pinned versions: MapLibre GL, D3, three.js,
-anime.js, Turf, topojson-client and JSZip.
-
-To work on it:
-
-```bash
-npm run build:test   # dist/itinera.test.html, loads the libraries from node_modules
-python3 -m http.server
-# open http://localhost:8000/dist/itinera.test.html
-```
+The landing page loads only React and the animation library. The map, the charts and the
+cube load when you open data.
 
 ## Deploy
 
-The output is a single static file, so any static host works.
+The output in `dist/` is a static site, so any static host works.
 
 **GitHub Pages.** The workflow in `.github/workflows/pages.yml` builds and deploys on each
 push to `main`. In the repository, open Settings › Pages and set *Source* to
 *GitHub Actions*.
 
-**Netlify.** `netlify.toml` sets the build command (`npm ci && python3 build.py prod`)
-and the publish directory (`dist`). Connect the repository and deploy. For a one-off
+**Netlify.** `netlify.toml` sets the build command (`npm run build`), Node 22 and the
+publish directory (`dist`). Connect the repository and deploy. For a one-off
 deploy, drag the `dist` folder onto Netlify Drop instead.
 
 The optional *Street map* layer loads CARTO tiles from the internet, and those requests show
@@ -123,19 +117,20 @@ requests after it loads unless you turn it on.
 ## Tests
 
 ```bash
-pip install playwright && python3 -m playwright install chromium
-npm test             # syntax check, test build, headless smoke test on the sample
+npx playwright install chromium   # once
+npm test             # build, then a headless smoke test on the sample
 npm run shots        # screenshots of the main views, light and dark, into tests/out/
 ```
 
-The smoke test serves the page over http, so its security policy applies as on a real
+The smoke test serves the built site over http, so its security policy applies as on a real
 host. It loads the sample and checks the key numbers: 3 devices, 30 places, home and work
 found, 2 countries, "98% together", and a distance within 100 km of the true 9,881 km.
 It also checks that:
 
-- the cube floor and the map view survive a change of view;
+- the cube draws, and the cube floor and the map view survive a change of view;
 - trails render, which proves the map worker runs under the policy;
-- a `.zip` can be read;
+- selecting a travel mode filters the other views, and Escape clears it;
+- a `.zip` loads through the file input;
 - a request to another site is blocked.
 
 Any policy violation fails the test. Headless runs use software WebGL, so they are slow.
@@ -143,19 +138,20 @@ Any policy violation fails the test. Headless runs use software WebGL, so they a
 ## Project layout
 
 ```
-src/template.html   HTML and CSS
-src/a_data.js       parsers, stay and trip detection
-src/b_analytics.js  state, places and roles, linked filtering, aggregates
-src/c_map.js        MapLibre map, layers, playback
-src/d_charts.js     KPIs, timeline, calendar, rhythm, modes, places
-src/e_cube.js       space-time cube (three.js)
-src/f_sample.js     synthetic sample in three real export formats
-src/g_main.js       app wiring, file loading, export, theme
-build.py            puts src/ together into dist/
-tools/gazetteer.js  compact town list for the build
+index.html          Vite entry
+vite.config.js      build: React, the gazetteer module, the security policy
+src/main.jsx        entry: theme, <App/>
+src/store.js        app state
+src/actions.js      loading, analysis updates, filters, devices, export
+src/playback.js     playback clock
+src/lib/            parsers, stay and trip detection, places and roles, linked filtering,
+                    aggregates, colours, the synthetic sample (plain JS, no React)
+src/map/            MapLibre map
+src/cube/           space-time cube (three.js)
+src/components/     React views
+tests/              Playwright smoke test and screenshots
 ```
 
-The files share one script scope and are joined in name order. There is no bundler.
 `AGENTS.md` has the architecture notes and the list of open work.
 
 ## Data credits

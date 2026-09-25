@@ -10,13 +10,14 @@ interactive views for geovisual analytics. It is like the popular "upload your t
 see an animation" sites, but it is for data exploration: linked charts, maps, sliders,
 sparklines and a playback animation that give insight.
 
-The owner's original brief (keep to it):
+The owner's brief (keep to it):
 
 - All processing happens in the browser. No data leaves the page. There is no server.
 - Linked charts, interactive maps, sliders, sparklines and animation.
 - Support more than one timeline (more than one device). The user can combine them, or
   show each device with its own symbology.
-- Stack: plain JS, MapLibre GL, D3, three.js, anime.js, Turf.
+- Stack: React and Vite, with MapLibre GL, D3, three.js, anime.js and Turf. It was plain JS
+  at first. The owner moved it to React and Vite, and Python is not part of the toolchain.
 - Be creative. Avoid generic dashboard design.
 
 The owner is a geovisual analytics researcher. Correct cartography and honest encodings
@@ -24,75 +25,95 @@ are more important than decoration.
 
 ## 2. Hard constraints
 
-The final product is **one self-contained HTML file** (`dist/index.html`, also written as
-`dist/itinera.html`). It is hosted as a static page on GitHub Pages or Netlify. It is no
-longer built as a Claude artifact.
+The product is a static site: `npm run build` writes `dist/` (an `index.html` plus hashed
+assets). It is hosted on GitHub Pages or Netlify. `base: './'` in `vite.config.js` makes it
+work under a sub-path.
 
-The build puts a **Content-Security-Policy** meta tag in the page (`csp()` in `build.py`), so
-the browser enforces the privacy promise. If you break these rules, the page is blocked:
+The build puts a **Content-Security-Policy** meta tag into `dist/index.html` (the `csp()`
+plugin in `vite.config.js`), so the browser enforces the privacy promise. If you break these
+rules, the page is blocked:
 
-- Scripts load **only** from `https://cdn.jsdelivr.net` and `https://cdnjs.cloudflare.com`
-  (exact pinned UMD builds), plus the inline scripts. `build.py` hashes the inline scripts,
-  so do not add inline `on…=` handlers and do not use `eval` or `new Function`.
-- Stylesheets come only from `https://fonts.googleapis.com` (font files from
-  `fonts.gstatic.com`) and inline CSS. The MapLibre CSS is inlined by the build.
+- Scripts load **only** from the site itself (`script-src 'self'`). All libraries are
+  bundled from npm. There are no CDN scripts and no inline scripts: the build fails if
+  `index.html` gets an inline `<script>`. Do not use `eval` or `new Function`.
+- Styles: the bundled CSS, inline styles (React `style` props and D3 attributes need
+  `'unsafe-inline'`), and Google Fonts (`fonts.googleapis.com`, files from `fonts.gstatic.com`).
 - The only allowed connection is the optional CARTO street tiles (`*.basemaps.cartocdn.com`).
-  There are no other `fetch` calls, remote images or trackers. The world basemap and the town
-  list are embedded.
+  There are no other `fetch` calls, remote images or trackers. The world outline and the town
+  list are bundled as JS chunks (so no `connect-src 'self'` is needed).
 - MapLibre's worker needs `worker-src blob:`.
-- If a new feature really needs another host, add it to `csp()` and say so in the README.
-- The smoke test runs the test build over http under the same policy. It fails on any policy
-  violation, and it checks that a `fetch` to another site is blocked.
+- If a new feature really needs another host, add it to `CSP` in `vite.config.js` and say so
+  in the README.
+- The dev server (`npm run dev`) has **no** CSP, because hot reload needs inline scripts. Always
+  check policy questions with the built site: `npm test` serves `dist/` over http, fails on any
+  policy violation, and checks that a `fetch` to another site is blocked.
 - `localStorage` works but can be empty. Always wrap it in `try/catch`.
 - Export uses a Blob download link (`itinera-selection.geojson`).
 - Theme: the viewer can set `data-theme="light|dark"` on `<html>`. The page also follows
-  `prefers-color-scheme`. `applyTheme()` in `g_main.js` writes `data-dark="1|0"`, and all
-  JS colour code reads `isDark()`.
-- Keep the safe-area CSS and the viewport meta tag in `template.html`.
+  `prefers-color-scheme`. `applyTheme()` in `src/theme.js` writes `data-dark="1|0"` and the
+  store's `dark` field. All JS colour code reads `isDark()` or `cssv()`.
+- Keep the safe-area CSS (`src/styles.css`) and the viewport meta tag (`index.html`).
 
 ## 3. Repository layout
 
 ```
-package.json        pinned library versions (dev dependencies) and npm scripts
-build.py            assembles src/ into dist/itinera.html (prod) or dist/itinera.test.html (test)
-src/template.html   all HTML and CSS; placeholders /*MAPLIBRE_CSS*/ <!--SCRIPTS--> /*WORLD*/ /*GAZ*/ /*APP*/
-tools/gazetteer.js  prints the compact town list (GeoNames, population >= 15,000) that build.py inlines as GAZ
-src/a_data.js       utilities, file parsers, stay and trip detection, finalize(), file loading
-src/b_analytics.js  global state S, colours, places and roles, filters, compute(), co-location
-src/c_map.js        MapLibre map, layers, tooltips, legend, playback engine
-src/d_charts.js     KPIs, timeline, calendar, weekly rhythm, modes, places, filter chips, sources bar
-src/e_cube.js       space-time cube (three.js), exposed as the Cube module
-src/f_sample.js     makeSample(): synthetic Lisbon year, emitted in three real export formats
-src/g_main.js       refresh loop, ingest, busy overlay, export, theme, landing hero, UI bindings
-tests/common.py     Playwright helpers (software WebGL flags, sample loading)
-tests/smoke.py      loads the sample, checks key numbers, exits 1 on failure
-tests/shots.py      screenshots of the main states into tests/out/
+package.json          pinned versions (React and Vite; the map, chart and 3D libraries) and npm scripts
+vite.config.js        React plugin, the 'virtual:gazetteer' module (GeoNames towns >= 15,000), the CSP plugin
+index.html            Vite entry: head, fonts, #root
+src/main.jsx          applies the theme, renders <App/> in StrictMode
+src/styles.css        all CSS (theme variables, layout, views)
+src/store.js          the app state: getState/setState/subscribe/useStore, toast(). Small: the landing uses it
+src/actions.js        everything that changes the analysis: loading, rebuildAll, refresh/recompute,
+                      setFilter, devices (hide, join, recolour, remove, combine), places, export
+src/playback.js       the playback clock (outside React state): togglePlay, stopPlay, seek, onClock, useClock
+src/theme.js          applyTheme(), useThemeWatch()
+src/tip.jsx           the shared tooltip: showTip(ev, jsx), hideTip(), <Tip/>
+src/hooks.js          useWidth() (ResizeObserver), reducedMotion()
+src/testHook.js       window.__itinera, for the browser tests (loaded with the workspace)
+src/lib/util.js       constants (MIN, HOUR, DAY), hav, bisect, formatting, localFields
+src/lib/parse.js      file readers, detectAndParse(), loadFiles(), readEntries()
+src/lib/build.js      finalize(): stays and trips from raw records; combinedRaw(), joinRaws()
+src/lib/geo.js        loadGeo() (world outline and gazetteer chunks), countryAt(), nearTown()
+src/lib/colors.js     MODES, INKS_L/INKS_D, HOUR_STOPS, isDark, cssv, inkOf, modeColor, hourColor, trackColor
+src/lib/analytics.js  buildContext() (places, roles), markDuplicates(), passes(), compute(), togetherness(), headAt()
+src/lib/sample.js     makeSample(): synthetic Lisbon year, emitted in three real export formats
+src/map/mapView.jsx   MapLibre map (imperative): layers, tooltips, framing, the map side of playback
+src/cube/cube.jsx     space-time cube (three.js, imperative)
+src/components/       React views: App, Landing (+ hero), Workspace (top bar, KPIs), Stage (map/cube
+                      hosts, layers, legend), Side (filters, rhythm, modes, places), Time (player,
+                      timeline, calendar), Seg
+tests/common.mjs      Playwright helpers: static server for dist/, software WebGL flags, sample loading
+tests/smoke.mjs       loads the sample, checks key numbers and the policy, exits 1 on failure
+tests/shots.mjs       screenshots of the main states into tests/out/
 ```
 
-There is no bundler and no module system. The build concatenates `src/a_*.js` to `src/g_*.js`
-**in file-name order** into one `<script>`. All files share one top-level scope, and
-`a_data.js` begins with `'use strict'`. A new file needs a letter prefix in the correct order.
-A later file can call functions from an earlier file at load time. An earlier file can call
-functions from a later file only at run time (for example, `d_charts.js` calls `refresh()`).
+`src/lib/` is plain JS with no React and no app state: every analytics function takes the
+state `st` as a parameter. Keep it that way. It is the part that must stay correct.
+
+The landing page loads only React, anime.js and the store. `Workspace.jsx` (with MapLibre,
+three.js, D3 and Turf) and `actions.js` are loaded on demand with `lazy()` and `import()`. Do not
+import them from `App.jsx`, `Landing.jsx`, `store.js` or `main.jsx`, or the landing bundle grows
+from about 100 kB to about 500 kB (gzip).
 
 ## 4. Set up, build and test
 
 ```bash
-npm install                                  # libraries go to node_modules; only the build uses them
-pip install playwright && python3 -m playwright install chromium
-npm run check                                # node --check on every src file
-npm run build:test                           # dist/itinera.test.html (loads libs from ../node_modules)
-npm test                                     # check + test build + tests/smoke.py
-npm run shots                                # screenshots, light and dark, into tests/out/
-npm run build                                # dist/itinera.html (CDN scripts) = the file to publish
+npm install
+npx playwright install chromium   # once, for the tests
+npm run dev                       # dev server with hot reload (no CSP)
+npm run build                     # dist/ = the site to publish
+npm run preview                   # serve dist/ locally
+npm test                          # build + tests/smoke.mjs against dist/ (with the CSP)
+npm run shots                     # build + screenshots, light and dark, into tests/out/
 ```
 
-- To open the test build by hand, serve the project root (`python3 -m http.server`) and
-  open `/dist/itinera.test.html`. Some browsers block `file://` script loads.
+- Node 22 (Vite 8 needs `^20.19` or `>=22.12`).
 - Headless WebGL is software rendered (SwiftShader). It is slow. MapLibre start-up takes
   about 4 s there. On a real GPU it is fast. Do not tune performance from headless timings.
-- In a sandbox without internet, Google Fonts fails with a 403 error. That error is
-  harmless. The font stack falls back to system fonts.
+- `page.waitForFunction` builds its check with `eval`, which the policy blocks. The tests poll
+  with `page.evaluate` (`waitFor()` in `tests/common.mjs`).
+- In a sandbox without internet, Google Fonts fails. That error is harmless. The font stack
+  falls back to system fonts, and the tests ignore it.
 - After a visual change, run `npm run shots` and **look at the PNG files**. Many faults in
   this project are visual only (see section 9).
 - Set `CHROME=/path/to/chrome` to use a specific browser binary.
@@ -104,10 +125,10 @@ npm run build                                # dist/itinera.html (CDN scripts) =
 ```
 files -> loadFiles() -> detectAndParse() -> raw sources  (points P{t,lat,lon,acc,off}, visits[], trips[])
       -> finalize(raw, id) -> source {id,name,kind,files,raw,T,LA,LO,OF,visits,trips,t0,t1,derivedVisits,derivedTrips,colorIdx}
-      -> S.sources[]   (combined mode: S.merged = finalize(combinedRaw(visible), 1000, {merge:true}))
-      -> buildContext() -> S.ctx  (places, home/work, day/month/week indices, coverage, moving intervals)
-      -> compute()      -> S.res  (filtered aggregates for every view)
-      -> render*() and updateMap() and Cube
+      -> state.sources   (combined mode: state.merged = finalize(combinedRaw(visible), 1000, {merge:true}))
+      -> buildContext(st) -> state.ctx  (places, home/work, day/month/week indices, coverage, moving intervals)
+      -> compute(st)      -> state.res  (filtered aggregates for every view)
+      -> React components, the map controller and the cube read the state
 ```
 
 - `T, LA, LO` are `Float64Array`, and `OF` is `Int16Array`: the UTC offset in minutes for each
@@ -123,75 +144,89 @@ files -> loadFiles() -> detectAndParse() -> raw sources  (points P{t,lat,lon,acc
 - `finalize()` drops "trips" of over 2 h at under 1 km/h. They are gaps in the record, and
   `src.gapTrips` counts them. Real exports have many of these, and they flattened the rhythm.
 - Places: stays are clustered by `placeId`, or on a 160 m grid. Home changes over time.
-  `homePeriods()` picks, for each local month, the place with the most night hours
+  `rolePeriods()` picks, for each local month, the place with the most night hours
   (00:00–06:00), with Google `HOME` visits weighted 1.5×. It merges short detours and gaps
   between the same home, and it never bridges long gaps. The result is
-  `ctx.homes = [{place, t0, t1, labelled}]`, with `homeAt(t)`, `ctx.homeByDay`,
+  `ctx.homes = [{place, t0, t1, labelled}]`, with `homeAt(t, ctx)`, `ctx.homeByDay`,
   `ctx.homeSet`, and `ctx.home` for the latest home. Every home-based value (time at home,
   farthest from home, the cube, "Home area") uses the home of that time. Work uses the same
   `rolePeriods()` with weekday 09:00–17:00 hours (`ctx.works`, `ctx.workSet`). Hours-only
   work periods need at least 2 months. Inferred roles show "inferred" or "?" in the UI.
-- Several devices, one person: `markDuplicates()` marks `dup = true` on stays and trips that
-  overlap a higher-ranked device (ranked by days with records). A trip is dropped only if the
-  higher-ranked device was also moving. Person-level aggregates in `compute()` (KPIs, monthly
+- Several devices, one person: `markDuplicates(st, ctx)` marks `dup = true` on stays and trips
+  that overlap a higher-ranked device (ranked by days with records). A trip is dropped only if
+  the higher-ranked device was also moving. Person-level aggregates in `compute()` (KPIs, monthly
   series, far-from-home, modes, place times, flows) skip `dup` items. The map, the cube and
   `res.V`/`res.T` keep them all. It runs again when a device is hidden or shown.
-- Unnamed places are labelled with `nearTown()`: the nearest GeoNames town within 30 km,
-  from the inlined `GAZ`, with no network. The user can rename places. Names are kept in
-  `localStorage['itinera-names']` and keyed by rounded coordinates.
-- `M.bounds` in `c_map.js` is the map view the user chose. A hidden map (cube view) reports a
-  400×300 fallback canvas, so the cube floor and view switches use `viewBounds()` and
-  `restoreView()`, never a bare `map.getBounds()`.
+- Device co-location (`togetherness()`) is computed once per set of visible devices, in
+  `rebuildAll()` and `toggleHidden()`, and kept in `state.pairs`.
+- Unnamed places are labelled with `nearTown()`: the nearest GeoNames town within 30 km, from
+  the bundled gazetteer, with no network. The user can rename places. Names are kept in
+  `localStorage['itinera-names']` and keyed by rounded coordinates. `buildContext()` mutates
+  `ctx.places[i].label`, so a rename bumps `state.labels` to re-render.
+- `buildContext()` and `markDuplicates()` write `place`, `from`, `to` and `dup` onto the stay and
+  trip objects in place. That is why the big data stays out of React state and is only read
+  by components.
 
-### Supported inputs (`detectAndParse`)
+### State and React
 
-- Android on-device `Timeline.json` (`semanticSegments`, `rawSignals`, `userLocationProfile`).
-- iPhone `location-history.json` (an array; `geo:` strings; `durationMinutesOffsetFromStartTime`).
-- Takeout `Records.json`. It is split into one source per `deviceTag`. `Settings.json`
-  (`deviceSettings`) gives the device names, so it is read first.
-- Older monthly Semantic Location History files. All the files go into one source.
-- GPX tracks, simple GeoJSON (points with time; lines with `coordTimes`).
-- A Takeout `.zip` (JSZip) and a dropped folder (`readEntries`).
+- `store.js` holds one state object. `setState(patch)` replaces it (never mutates it) and
+  notifies subscribers. Components select single fields with `useStore(s => s.field)`, so they
+  re-render only when that field changes. Use `getState()` inside handlers and effects.
+- **Filters are immutable.** `state.filter = {t0, t1, hours, dows, modes, place}`. Always build a new
+  filter with new Sets through `setFilter(patch, from)` in `actions.js`. Mutating a Set in
+  place is a silent bug: nothing re-renders.
+- `refresh(from)` merges calls into one `compute()` per animation frame and records `from` in
+  `state.from`. The timeline does not redraw when `from` is `'timeline'` (so a brush drag is
+  not cut off) and only moves its brush when `from` is `'calendar'`.
+- `passes(st, item, except, isTrip)` applies all filters except the one named, in the
+  crossfilter style: each view ignores its own filter, so its context stays visible. The
+  timeline and calendar ignore time. The rhythm grid ignores hours and days. The mode bars
+  ignore modes. The place list uses all filters.
+- The map, the cube, the timeline brush and the playback markers are **imperative** (MapLibre,
+  three.js, D3). Each is created once in an effect on a ref, subscribes to the store (and to
+  the clock), updates only what changed since its last call, and has a real cleanup
+  (`map.remove()`, `renderer.dispose()`). `npm run dev` runs StrictMode, which mounts every
+  effect twice, so a missing cleanup shows up as two maps or leaked WebGL contexts.
+- Tooltip content is JSX, so React escapes all file text. There is no `innerHTML` with file text.
 
-### Linked filtering
-
-`S.filter = {t0, t1, hours, dows, modes, place}`. `passes(item, except, isTrip)` applies all
-filters except the one named, in the crossfilter style: each view ignores its own filter,
-so its context stays visible. The timeline and calendar ignore time. The rhythm grid ignores
-hours and days. The mode bars ignore modes. The place list uses all filters.
-
-`refresh(from)` merges calls into one per animation frame. When `from` is `'timeline'` or
-`'calendar'`, it does not redraw the timeline, so a brush drag is not interrupted. All other
-sources redraw everything. Call `refresh()` after each state change. Do not call the render
-functions in a chain.
-
-### Map (`c_map.js`)
+### Map (`src/map/mapView.jsx`)
 
 The style is built in code. It has a background (water), a graticule, land and borders from
-the embedded topojson. There are no glyphs or symbol layers, because they need the network.
-The data layers are `heat`, `ellipse-*`, `trails`, `trails-fl` (flights, dashed), `flows`,
-`places`, `place-hl`, one `tail-<id>` line-gradient layer per device, and `heads`. The
-filters are MapLibre expressions made by `baseFilter()`. The optional CARTO street tiles
-fail in the published page. `streetsFailed()` then shows a toast. That is expected.
+the bundled topojson. There are no glyphs or symbol layers, because they need the network.
+The data layers are `heat`, `ellipse-*`, `trails`, `trails-fl` (flights, dashed), `trails-jump`,
+`flows`, `places`, `place-hl`, one `tail-<id>` line-gradient layer per device, and `heads`. The
+filters are MapLibre expressions made by `baseFilter()`. `sync()` compares the new state with
+the last one: new `ctx` → `setMapData()`; new `res`, colours, layers or visibility →
+`updateMap()`; theme → `restyleMap()`. The optional CARTO street tiles fail without internet.
+`streetsFailed()` then shows a toast. That is expected.
 
-### Playback
+`M.bounds` is the map view the user chose. A hidden map (cube view) reports a 400×300 fallback
+canvas, so the cube floor and view switches use `viewBounds()` and `restoreView()`, never a bare
+`map.getBounds()`. `setView()` queues the map resize before the state change, so the map is
+resized before the cube reads its bounds.
 
-`S.play = {on, session, clock, speed, skip, follow}`. `speedRate(v)` is a log scale from
-5 min/s to 60 days/s. "Skip time at places" jumps across the gaps between moving intervals
-(`S.ctx.moving`). Each frame updates the device heads, the fading tails, the progressive
-reveal of trails (throttled to 140 ms), the timeline playhead, the current cell in the
-calendar and rhythm grid, and the cube clock plane.
+### Playback (`src/playback.js`)
 
-### Space-time cube (`e_cube.js`)
+The clock changes every frame, so it is not React state. `state.playing`, `state.session`,
+`state.speed`, `state.skip` and `state.follow` are. `speedRate(v)` is a log scale from 5 min/s to
+60 days/s. "Skip time at places" jumps across the gaps between moving intervals
+(`ctx.moving`). Each frame, `onClock` subscribers update the device heads, the fading tails, the
+progressive reveal of trails (throttled to 140 ms), the timeline playhead, the current cell in
+the calendar and rhythm grid, and the cube clock plane. Only the clock text re-renders
+(`useClock()`).
+
+### Space-time cube (`src/cube/cube.jsx`)
 
 The floor is the current map view (web mercator, longest side = 100 units). The height is
 the selected time range (72 units). Trips are `LineSegments` with vertex colours and a
 ground shadow. Stays are an `InstancedMesh` of cylinders. Place names and time ticks are
-HTML labels projected each frame. The module renders on demand only (on OrbitControls
-`change`, clock updates or rebuilds). API: `init, build, schedule, setClock, show, rebuild`.
-It must fail gracefully when there is no WebGL or three.js.
+HTML labels projected each frame, in a box above the canvas. The module renders on demand only
+(on OrbitControls `change`, clock updates or rebuilds). `createCube(el, lblBox, setCaption)` is
+called the first time the cube is shown and returns `{build, schedule, setClock, show, destroy}`.
+It must fail gracefully when there is no WebGL. three.js is pinned at 0.147 because r152 and
+later change colour management, which shifts every colour.
 
-### Sample data (`f_sample.js`)
+### Sample data (`src/lib/sample.js`)
 
 A seeded, synthetic year in Lisbon from 6 Jan 2025 to 27 Feb 2026. It has commutes,
 lunches, gym, runs, weekend market, beach and Sintra trips, Porto by train (17 to 21 Apr
@@ -204,8 +239,8 @@ from 3 to 11 Nov 2025. It emits:
 - `runs.gpx` ("Running watch", runs from 1 Mar 2025).
 
 The sample goes through the real parsers. Keep it that way. It is the regression test for
-the parsers. Expected result: 3 sources, about 30 places, Home and Work found, 2 countries,
-"Pixel phone and Work phone together 98% of the time".
+the parsers. Expected result: 3 sources, 30 places, Home and Work found, 2 countries,
+9,889 km, "Pixel phone and Work phone together 98% of the time".
 
 ## 6. Design rules
 
@@ -221,35 +256,49 @@ the parsers. Expected result: 3 sources, about 30 places, Home and Work found, 2
 - UI copy is in sentence case and plain English. Use en-GB number and date formats. Say
   "inferred" or "estimated" when a value is not in the source data.
 - All colours come from CSS variables (`cssv('--ink')` and similar) or the ink arrays, so
-  that both themes work. After a theme change, `onThemeChange()` restyles the map,
-  redraws the charts and rebuilds the cube.
+  that both themes work. A component that uses colours selects `state.dark`, so it re-renders
+  after a theme change. The map restyles and the cube rebuilds from the same field.
 - Accessibility: segment buttons use `aria-pressed`, and rows can be used with the keyboard.
   Keep it so. Respect `prefers-reduced-motion` (anime.js and the hero animation already do).
 
 ## 7. Conventions
 
-- Plain ES2020, 2-space indent, semicolons, single quotes. No framework and no bundler.
-- Keep functions near the view that they serve. Do not add a new global unless many files need it.
+- Modern JS (ES2022) with JSX, 2-space indent, semicolons, single quotes. React function
+  components and hooks. No TypeScript, no CSS framework and no state library.
+- Keep functions near the view that they serve. Pure data and analytics code goes in
+  `src/lib/` and takes the state as a parameter.
 - Time values are UTC milliseconds. Use `MIN`, `HOUR`, `DAY`. Local fields come from `localFields()`.
-- Escape all user and file text with `esc()` before you put it in `innerHTML`. Do not use `esc()` with `textContent`.
+- d3 inside React: use `selectAll` to reach an element that d3 made (brush parts, axes).
+  `selection.select` copies the parent's datum onto the child.
+- Keep the DOM ids and class names that the CSS and the tests use (`#sampleBtn`, `#app`, `#busy`,
+  `.kpi .n`, `#together`, `#viewSeg button[data-v=…]`, `.mode-row[data-k=…]`, `#fileInput`).
 - After each change: `npm test`. After a visual change: also `npm run shots`, and look at the images.
 
 ## 8. Status
 
-Work that is done and tested with the sample (headless Chromium):
-loading and parsing, stay and trip detection, places and roles, KPIs with sparklines, timeline
-with brush and coverage rows, calendar heatmap (quantile colours), weekly rhythm with drag
-selection, mode bars, place list with weekly sparklines and details, filter chips, sources
-bar (recolour, rename, hide, join, remove), device co-location, map layers and tooltips,
-playback (clock, playhead, current cells, tails, heads), split view, and the cube in its
-first version.
+Rewritten in React and Vite in Sep 2026. The rewrite kept the logic of the plain-JS version.
+A parity probe compared the two builds on the sample in seven states (no filter, a time range,
+one mode, a rhythm selection, one place, a hidden device, combined mode): every aggregate was
+identical, and the screenshots matched in both themes. The rewrite also fixed a bug that the
+plain-JS version had: dragging the timeline brush crashed in d3-brush (`gBrush.select('.overlay')`
+copied the group's datum over the overlay's `{type}`; it is `selectAll` now). The smoke test now
+drags the brush.
 
-Tested with a real ten-year Android `Timeline.json` from the owner. It is in `data_sample/`,
-which is git-ignored personal data: test with it only in local probes, and never commit,
-publish or quote it. Dark mode has been checked in screenshots.
+Work that is done and tested with the sample (headless Chromium):
+loading and parsing (including a `.zip` through the file input), stay and trip detection,
+places and roles, KPIs with sparklines, timeline with brush and coverage rows, calendar heatmap
+(quantile colours), weekly rhythm with drag selection, mode bars, place list with weekly
+sparklines and details, filter chips, sources bar (recolour, rename, hide, join, remove),
+device co-location, combined mode, map layers and tooltips, playback (clock, playhead, current
+cells, tails, heads), split view, and the cube in its first version.
+
+Tested with a real ten-year Android `Timeline.json` from the owner, before and after the rewrite
+(loads without errors, outline map at world scale, brushing works). It is
+in `data_sample/`, which is git-ignored personal data: test with it only in local probes, and
+never commit, publish or quote it. Dark mode has been checked in screenshots.
 
 Work that is not tested yet: other real export files (Takeout zip, iPhone JSON, the older
-Semantic Location History), combined mode, export, the layer toggles, mobile layout.
+Semantic Location History), export, the layer toggles, mobile layout.
 
 ## 9. Known issues and next tasks (in priority order)
 
@@ -270,29 +319,34 @@ Semantic Location History), combined mode, export, the layer toggles, mobile lay
 8. **Timeline axis.** The first tick label is clipped (for example "017").
 9. **Cube at world scale.** With ten years and two continents, local trips collapse to dots.
    Consider a default floor of the home area, or a log-time axis.
-11. **Progressive reveal in playback** looks as if nothing changes when the routes repeat.
+10. **Progressive reveal in playback** looks as if nothing changes when the routes repeat.
     Consider a short "recent trips" highlight in addition to the tail.
-12. **Load time.** About 1 s of JS work for the sample. `makeSample()` takes about 0.7 s.
-    `togetherness()` runs on every `renderSources`/`renderTogether` call. Cache it per
-    source set. For large Records.json files (hundreds of MB), move parsing and
-    `finalize()` into a Web Worker created from a Blob (the policy allows `worker-src blob:`).
-14. **Test real exports.** Android is done. iPhone, Records.json and Semantic Location
+11. **Load time.** About 1 s of JS work for the sample. `makeSample()` takes about 0.7 s. For
+    large Records.json files (hundreds of MB), move parsing and `finalize()` into a Web Worker
+    (Vite supports `new Worker(new URL('./worker.js', import.meta.url), { type: 'module' })`;
+    the policy needs `worker-src 'self' blob:` for it).
+12. **Test real exports.** Android is done. iPhone, Records.json and Semantic Location
     History are still needed. Add samples to `tests/fixtures/` only if the owner agrees.
     They are personal location data. Never commit real location data to a public repository.
-18. **Street-level place names (optional).** The owner wants more context. Online reverse
+13. **Street-level place names (optional).** The owner wants more context. Online reverse
     geocoding would send coordinates off the device, so it must be opt-in and needs a new
-    `connect-src` host in `csp()`. Tell the user what is sent before the first request.
-15. Small clean-up: `parseRecords()` makes the default name with a `' ·'` string that it
-    then replaces. Simplify it.
-16. Mobile layout (narrow screens) is not checked. The CSS has a breakpoint that stacks the views.
+    `connect-src` host in the CSP. Tell the user what is sent before the first request.
+14. Mobile layout (narrow screens) is not checked. The CSS has a breakpoint that stacks the views.
+15. **Brushing a ten-year export** recomputes all views on each brush frame: about 150 ms per
+    step in headless Chromium, of which `compute()` is 40–100 ms. Check it on a real GPU first. If
+    it lags, compute only the cheap views while the brush moves and the rest on `end`, or memoise
+    the calendar cells and set only their opacity.
+16. The workspace chunk and `actions.js` are about 510 kB and 860 kB before gzip (MapLibre,
+    three.js, Turf). The cube could be split further with a dynamic `import()` of `cube.jsx`.
 
 ## 10. Publishing
 
 GitHub Pages (`.github/workflows/pages.yml`) or Netlify (`netlify.toml`). Both run
-`npm ci && python3 build.py prod` and serve `dist/`. Do not publish Claude artifacts to test.
+`npm run build` (after `npm ci`) and serve `dist/`. Do not publish Claude artifacts to test.
 Test locally with `npm test` and `npm run shots`.
 
 Before you push, check:
 
 - `npm test` passes, and the screenshots in both themes look correct.
-- `dist/index.html` has no `node_modules` paths and no script hosts other than those in section 2.
+- `dist/index.html` has the CSP meta tag and no inline scripts, and no script comes from
+  another host.

@@ -9,7 +9,7 @@ the others filter to match.
 upload. Files are read with the browser's File API. When you close the tab, the data is
 gone. The page carries a Content-Security-Policy, so the browser itself blocks any attempt
 to send data elsewhere. Scripts load only from the site itself. The only other requests it
-allows are the font and the optional street-map tiles (see [Deploy](#deploy)).
+allows are the font and the optional online basemaps (see [Deploy](#deploy)).
 
 ## What you can do
 
@@ -110,9 +110,15 @@ push to `main`. In the repository, open Settings › Pages and set *Source* to
 publish directory (`dist`). Connect the repository and deploy. For a one-off
 deploy, drag the `dist` folder onto Netlify Drop instead.
 
-The optional *Street map* layer loads CARTO tiles from the internet, and those requests show
-CARTO which map area you are viewing. The layer is off by default, so the page makes no
-requests after it loads unless you turn it on.
+The basemap is the built-in outline map by default, so the page makes no requests after it
+loads. Under *Layers › Basemap* you can choose an online one: street tiles from CARTO
+(`*.basemaps.cartocdn.com`), or streets and labels, or a detailed map with shops and places, from
+OpenFreeMap (`tiles.openfreemap.org`). Those requests show that server which map area you are
+viewing, but none of your location data. They help you recognise a place yourself, without
+reverse geocoding.
+
+A place's details also have *Open in Google Maps* and *OpenStreetMap* links. They open a new tab
+at that place's coordinates, and nothing is sent until you click one.
 
 ## Tests
 

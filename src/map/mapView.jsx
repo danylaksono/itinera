@@ -13,7 +13,7 @@ import { showTip, hideTip } from '../tip.jsx';
 import { selectPlace } from '../actions.js';
 
 let map = null, ready = false;
-const M = { tailSrcs: new Set(), lastReveal: 0, bounds: null, quiet: false, fitted: false, world: false, streetsTimer: null, streetsWarned: false };
+const M = { tailSrcs: new Set(), lastReveal: 0, bounds: null, quiet: false, fitted: false, world: false, basemapTimer: null, basemapWarned: false, basemapToken: 0 };
 export const getMap = () => map;
 export const mapReady = () => ready;
 const empty = () => ({ type: 'FeatureCollection', features: [] });
@@ -113,7 +113,7 @@ export function createMap(container) {
     if (getClock() != null) drawFrame(getClock(), true);
   });
   m.on('error', e => {
-    if (e && e.sourceId === 'streets' || (e?.error?.message || '').includes('cartocdn')) streetsFailed();
+    if (e?.sourceId?.startsWith('bm-') || /cartocdn|openfreemap/.test(e?.error?.message || '')) basemapFailed();
   });
 
   /* apply what changed in the store since the last call */
@@ -128,7 +128,7 @@ export function createMap(container) {
     else if (st.sources !== p.sources) restyleTails(st);
     if (st.res !== p.res || st.colorBy !== p.colorBy || st.layers !== p.layers || st.hidden !== p.hidden || st.dark !== p.dark || st.sources !== p.sources) updateMap(st);
     if (st.hlPlace !== p.hlPlace || st.filter.place !== p.filter?.place) m.setFilter('place-hl', ['==', ['get', 'i'], st.hlPlace ?? st.filter.place ?? -1]);
-    if (st.layers.streets !== p.layers?.streets) setStreets(st, st.layers.streets);
+    if (st.basemap !== p.basemap) setBasemap(st);
     if (!M.fitted) { M.fitted = true; fitHome(false); }
   }
   /* MapLibre follows window resizes only. The panels around the map can change size on their own
@@ -142,7 +142,7 @@ export function createMap(container) {
   return () => {
     ro.disconnect(); cancelAnimationFrame(rzRaf);
     unsub?.(); unclock?.();
-    clearTimeout(M.streetsTimer);
+    clearTimeout(M.basemapTimer); M.basemapToken++;
     ready = false; map = null;
     m.remove();
   };
@@ -321,28 +321,59 @@ function restyleMap(st) {
   map.setPaintProperty('flows', 'line-color', cssv('--ink'));
   map.setPaintProperty('heads', 'circle-stroke-color', cssv('--paper'));
   restyleTails(st);
-  if (map.getSource('streets')) { map.removeLayer('streets'); map.removeSource('streets'); setStreets(st, st.layers.streets); }
+  if (st.basemap !== 'outline' && st.basemap !== 'ofm-poi') setBasemap(st); // CARTO and OpenFreeMap streets have light and dark styles
 }
 
-/* ---------- optional online street tiles ---------- */
-function setStreets(st, on) {
-  if (!on) { if (map.getLayer('streets')) map.setLayoutProperty('streets', 'visibility', 'none'); return; }
-  if (!map.getSource('streets')) {
-    const style = isDark() ? 'dark_all' : 'light_all';
-    map.addSource('streets', { type: 'raster', tileSize: 256, maxzoom: 19, attribution: '© OpenStreetMap contributors © CARTO',
-      tiles: ['a', 'b', 'c'].map(s => `https://${s}.basemaps.cartocdn.com/${style}/{z}/{x}/{y}.png`) });
-    map.addLayer({ id: 'streets', type: 'raster', source: 'streets', paint: { 'raster-opacity': 0.9 } }, 'heat');
-    let loaded = false;
-    const m = map;
-    const ok = e => { if (e.sourceId === 'streets' && e.tile) { loaded = true; m.off('sourcedata', ok); } };
-    m.on('sourcedata', ok);
-    clearTimeout(M.streetsTimer);
-    M.streetsTimer = setTimeout(() => { if (!loaded && getState().layers.streets) streetsFailed(); }, 6000);
-  } else map.setLayoutProperty('streets', 'visibility', 'visible');
+/* ---------- optional online basemaps (off by default; see the README) ----------
+   They go under the data: the basemap's own layers are inserted below the heat layer, and its labels
+   below the place circles (so street and shop names show over the trails). The tile server sees
+   which map area is viewed; nothing else leaves the page. */
+export const BASEMAPS = [
+  ['outline', 'Outline map (offline)'],
+  ['carto', 'Streets, CARTO'],
+  ['ofm', 'Streets and labels, OpenFreeMap'],
+  ['ofm-poi', 'Detailed, with shops and places, OpenFreeMap']
+];
+const OFM = 'https://tiles.openfreemap.org/styles/';
+function clearBasemap() {
+  const s = map.getStyle();
+  for (const l of s.layers) if (l.id.startsWith('bm-')) map.removeLayer(l.id);
+  for (const id of Object.keys(s.sources)) if (id.startsWith('bm-')) map.removeSource(id);
 }
-function streetsFailed() {
-  if (M.streetsWarned) return; M.streetsWarned = true;
-  toast('Street tiles did not load. Check your internet connection. The built-in outline map still works offline.', 9000);
+async function setBasemap(st) {
+  const token = ++M.basemapToken;
+  clearTimeout(M.basemapTimer);
+  clearBasemap();
+  if (st.basemap === 'outline') return;
+  if (st.basemap === 'carto') {
+    const style = isDark() ? 'dark_all' : 'light_all';
+    map.addSource('bm-carto', { type: 'raster', tileSize: 256, maxzoom: 19, attribution: '© OpenStreetMap contributors © CARTO',
+      tiles: ['a', 'b', 'c'].map(s => `https://${s}.basemaps.cartocdn.com/${style}/{z}/{x}/{y}.png`) });
+    map.addLayer({ id: 'bm-carto', type: 'raster', source: 'bm-carto', paint: { 'raster-opacity': 0.9 } }, 'heat');
+  } else {
+    // a vector style: Positron or Dark for streets, Liberty for shops and places
+    const name = st.basemap === 'ofm-poi' ? 'liberty' : isDark() ? 'dark' : 'positron';
+    let style;
+    try { style = await (await fetch(OFM + name)).json(); } catch (e) { if (token === M.basemapToken) basemapFailed(); return; }
+    if (token !== M.basemapToken || !ready) return;
+    if (style.glyphs) map.setGlyphs(style.glyphs);
+    if (style.sprite) map.setSprite(style.sprite);
+    for (const [id, src] of Object.entries(style.sources)) map.addSource('bm-' + id, src);
+    for (const l of style.layers) {
+      const layer = { ...l, id: 'bm-' + l.id };
+      if (l.source) layer.source = 'bm-' + l.source;
+      map.addLayer(layer, l.type === 'symbol' ? 'places' : 'heat');
+    }
+  }
+  // no tile within 8 s: say so (offline, or the server is down)
+  let loaded = false;
+  const m = map, ok = e => { if (e.sourceId?.startsWith('bm-') && e.tile) { loaded = true; m.off('sourcedata', ok); } };
+  m.on('sourcedata', ok);
+  M.basemapTimer = setTimeout(() => { m.off('sourcedata', ok); if (!loaded && token === M.basemapToken) basemapFailed(); }, 8000);
+}
+function basemapFailed() {
+  if (M.basemapWarned) return; M.basemapWarned = true;
+  toast('The online basemap did not load. Check your internet connection. The outline map still works offline.', 9000);
 }
 
 /* ---------- framing ---------- */

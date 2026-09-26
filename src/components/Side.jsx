@@ -7,7 +7,7 @@ import { activeSources, offNear, rangeToDays, srcById } from '../lib/analytics.j
 import { renamePlace, selectPlace, setFilter } from '../actions.js';
 import { onClock } from '../playback.js';
 import { showTip, hideTip } from '../tip.jsx';
-import { useWidth } from '../hooks.js';
+import { useWidth, reducedMotion } from '../hooks.js';
 import Seg from './Seg.jsx';
 
 export default function Side() {
@@ -158,6 +158,14 @@ function Places() {
   const res = useStore(s => s.res), ctx = useStore(s => s.ctx), sel = useStore(s => s.filter.place), open = useStore(s => s.openPlace), hl = useStore(s => s.hlPlace);
   useStore(s => s.labels); useStore(s => s.dark);
   const [limit, setLimit] = useState(12);
+  // a place selected elsewhere (the map, the timetable) is shown in the list and scrolled into view
+  const openRow = useRef(null);
+  useEffect(() => {
+    if (open == null || !res) return;
+    const k = res.places.findIndex(o => o.i === open);
+    if (k >= limit) { setLimit(k + 1); return; }
+    openRow.current?.scrollIntoView({ block: 'nearest', behavior: reducedMotion() ? 'auto' : 'smooth' });
+  }, [open, res, limit]);
   if (!res) return null;
   const st = getState();
   const days = rangeToDays(st);
@@ -183,7 +191,7 @@ function Places() {
           const p = ctx.places[o.i];
           const isOpen = open === o.i;
           return (
-            <div key={o.i} className={'place' + (sel === o.i ? ' sel' : '') + (hl === o.i ? ' hl' : '')} data-i={o.i} tabIndex="0" role="button" aria-expanded={isOpen}
+            <div key={o.i} ref={isOpen ? openRow : null} className={'place' + (sel === o.i ? ' sel' : '') + (hl === o.i ? ' hl' : '')} data-i={o.i} tabIndex="0" role="button" aria-expanded={isOpen}
               onMouseEnter={() => hover(o.i)} onMouseLeave={() => hover(null)}
               onClick={e => { if (!e.target.closest('.place-more')) selectPlace(o.i, true); }}
               onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && !e.target.closest('input')) { e.preventDefault(); selectPlace(o.i, true); } }}>
@@ -200,6 +208,19 @@ function Places() {
         {res.places.length > limit && <button className="btn small" id="morePlaces" style={{ marginTop: 8 }} onClick={() => setLimit(l => l + 30)}>Show {Math.min(30, res.places.length - limit)} more</button>}
       </div>
     </section>
+  );
+}
+/* What is this place? Links open another site in a new tab, at this place's coordinates only.
+   Nothing is sent until the viewer clicks, and the note says what is sent. */
+function PlaceLinks({ p }) {
+  const ll = `${p.lat.toFixed(5)},${p.lon.toFixed(5)}`;
+  const stop = e => e.stopPropagation(); // a click on a link must not toggle the place row
+  return (
+    <div className="place-links">
+      <a href={`https://www.google.com/maps/search/?api=1&query=${ll}`} target="_blank" rel="noopener noreferrer" onClick={stop}>Open in Google Maps</a>
+      <a href={`https://www.openstreetmap.org/?mlat=${p.lat.toFixed(5)}&mlon=${p.lon.toFixed(5)}#map=18/${p.lat.toFixed(5)}/${p.lon.toFixed(5)}`} target="_blank" rel="noopener noreferrer" onClick={stop}>OpenStreetMap</a>
+      <small>Opens a new tab. That site receives this place's coordinates ({ll}), nothing else.</small>
+    </div>
   );
 }
 function PlaceMore({ o, p }) {
@@ -224,6 +245,7 @@ function PlaceMore({ o, p }) {
         {[...o.arr].map((v, h) => <rect key={h} x={h * bw + .5} y={H - 12 - v / mx * (H - 16)} width={bw - 1} height={v / mx * (H - 16)} fill={cssv('--ink-2')} />)}
         {[0, 6, 12, 18].map(h => <text key={h} x={h * bw} y={H - 1} fontSize="9.5" fill={cssv('--ink-3')}>{h}h</text>)}
       </svg></div>
+      <PlaceLinks p={p} />
     </div>
   );
 }

@@ -126,7 +126,13 @@ svg text{font-family:var(--font)}
 .layers{position:relative}
 .layers-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:8;background:var(--panel-2);border:1px solid var(--rule);border-radius:5px;padding:10px 12px;display:grid;gap:7px;min-width:230px;box-shadow:0 8px 24px rgba(0,0,0,.14)}
 .layers-pop[hidden]{display:none}
-.layers-pop .note{color:var(--ink-3);font-size:11.5px;max-width:28ch;margin:-3px 0 0 20px}
+.layers-pop .note{color:var(--ink-3);font-size:11.5px;max-width:34ch;margin:0}
+.layers-pop .basemaps{border:0;border-top:1px solid var(--rule-2);margin:2px 0 0;padding:8px 0 0;display:grid;gap:7px;min-width:0}
+.layers-pop .basemaps legend{padding:0;margin-bottom:2px;font-weight:600;color:var(--ink-2)}
+.place-links{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline}
+.place-links a{color:var(--ink);font-weight:600;text-decoration:underline;text-decoration-color:var(--rule);text-underline-offset:2px}
+.place-links a:hover{text-decoration-color:var(--ink)}
+.place-links small{flex-basis:100%;color:var(--ink-3);font-size:11px}
 .legend{position:absolute;left:10px;bottom:12px;z-index:3;background:color-mix(in srgb,var(--panel-2) 88%,transparent);border:1px solid var(--rule);border-radius:4px;padding:6px 9px;font-size:12px;display:flex;flex-wrap:wrap;gap:4px 12px;max-width:min(560px,70%);backdrop-filter:blur(4px)}
 .legend span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
 .legend i{display:inline-block;width:14px;height:3px;border-radius:2px}

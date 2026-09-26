@@ -38,10 +38,14 @@ rules, the page is blocked:
   `index.html` gets an inline `<script>`. Do not use `eval` or `new Function`.
 - Styles: the bundled CSS, inline styles (React `style` props and D3 attributes need
   `'unsafe-inline'`), and Google Fonts (`fonts.googleapis.com`, files from `fonts.gstatic.com`).
-- The only allowed connection is the optional CARTO street tiles (`*.basemaps.cartocdn.com`).
-  There are no other `fetch` calls, remote images or trackers. The world outline and the town
+- The only allowed connections are the optional online basemaps: CARTO (`*.basemaps.cartocdn.com`)
+  and OpenFreeMap (`tiles.openfreemap.org`, which serves the style, vector tiles, fonts and
+  sprites). They are off by default. The only `fetch` is the OpenFreeMap style JSON, when that
+  basemap is chosen. There are no remote images or trackers. The Google Maps and OpenStreetMap
+  links in a place's details are plain links (a new tab, on click), not requests from the page. The world outline and the town
   list are bundled as JS chunks (so no `connect-src 'self'` is needed).
-- MapLibre's worker needs `worker-src blob:`.
+- Workers: `worker-src 'self' blob:`. MapLibre starts its worker from a blob, and our file reader
+  (`src/fileWorker.js`) is a bundled file of the site.
 - If a new feature really needs another host, add it to `CSP` in `vite.config.js` and say so
   in the README.
 - The dev server (`npm run dev`) has **no** CSP, because hot reload needs inline scripts. Always
@@ -70,8 +74,10 @@ src/theme.js          applyTheme(), useThemeWatch()
 src/tip.jsx           the shared tooltip: showTip(ev, jsx), hideTip(), <Tip/>
 src/hooks.js          useWidth() (ResizeObserver), reducedMotion()
 src/testHook.js       window.__itinera, for the browser tests (loaded with the workspace)
+src/fileWorker.js     module worker that runs loadFiles() off the main thread (actions.js readFiles())
 src/lib/util.js       constants (MIN, HOUR, DAY), hav, bisect, formatting, localFields
-src/lib/parse.js      file readers, detectAndParse(), loadFiles(), readEntries()
+src/lib/parse.js      file readers, detectAndParse(), loadFiles(), readEntries(). No DOM APIs: it runs
+                      in the worker (the GPX reader uses regular expressions, not DOMParser)
 src/lib/build.js      finalize(): stays and trips from raw records; combinedRaw(), joinRaws()
 src/lib/geo.js        loadGeo() (world outline and gazetteer chunks), countryAt(), nearTown()
 src/lib/colors.js     MODES, INKS_L/INKS_D, HOUR_STOPS, isDark, cssv, inkOf, modeColor, hourColor, trackColor
@@ -204,8 +210,16 @@ The data layers are `heat`, `ellipse-*`, `trails`, `trails-fl` (flights, dashed)
 `flows`, `places`, `place-hl`, one `tail-<id>` line-gradient layer per device, and `heads`. The
 filters are MapLibre expressions made by `baseFilter()`. `sync()` compares the new state with
 the last one: new `ctx` → `setMapData()`; new `res`, colours, layers or visibility →
-`updateMap()`; theme → `restyleMap()`. The optional CARTO street tiles fail without internet.
-`streetsFailed()` then shows a toast. That is expected.
+`updateMap()`; theme → `restyleMap()`.
+
+Basemap (`state.basemap`, Layers › Basemap): `'outline'` (built in, offline), `'carto'` (raster),
+`'ofm'` (OpenFreeMap Positron, or Dark in the dark theme) or `'ofm-poi'` (OpenFreeMap Liberty, with
+shops and places). `setBasemap()` fetches the OpenFreeMap style JSON and adds its sources and
+layers into our map with a `bm-` prefix: the layers go under `heat`, and the symbol (label) layers go
+under `places`, so street and shop names show over the trails. A token drops the result of a stale
+switch. Without internet, `basemapFailed()` shows a toast. That is expected. Some OpenFreeMap
+Liberty icons log "could not be loaded" warnings (they are missing from its sprite), which is
+harmless.
 
 MapLibre follows window resizes only, so `createMap()` also puts a `ResizeObserver` on the map
 container. Without it, a panel that changes size after load (a late web-font load changes the
@@ -380,16 +394,23 @@ Semantic Location History), export, the layer toggles, mobile layout.
     `mapView.jsx`). While playing, the trail opacity interpolates on each trip's `t1`: trips from
     the last ~4 s of playback (6 h to 60 days of data, by speed) are bright, and older ones fade to
     22% of the usual opacity. The legend shows "Older to recent trips" during playback.
-11. **Load time.** About 1 s of JS work for the sample. `makeSample()` takes about 0.7 s. For
-    large Records.json files (hundreds of MB), move parsing and `finalize()` into a Web Worker
-    (Vite supports `new Worker(new URL('./worker.js', import.meta.url), { type: 'module' })`;
-    the policy needs `worker-src 'self' blob:` for it).
+11. **Load time.** Partly done (Sep 2026): reading, unzipping and parsing run in a module worker
+    (`src/fileWorker.js`, Vite `worker.format: 'es'`), with a fallback to the main thread if it
+    cannot start. On a ten-year Timeline.json that took about 0.8 s off the main thread; the raw
+    sources come back by structured clone (about 0.1 s). Still on the main thread: `finalize()`
+    (about 0.2 s; it needs every source's raw data for `offsetGuide()`) and `buildContext()` plus
+    `compute()` (about 1 s). Next steps: `finalize()` in the worker, with the known offsets of the
+    loaded sources sent along, and a lighter first `compute()`. `makeSample()` (about 0.7 s) still
+    runs in the page.
 12. **Test real exports.** Android is done. iPhone, Records.json and Semantic Location
     History are still needed. Add samples to `tests/fixtures/` only if the owner agrees.
     They are personal location data. Never commit real location data to a public repository.
-13. **Street-level place names (optional).** The owner wants more context. Online reverse
-    geocoding would send coordinates off the device, so it must be opt-in and needs a new
-    `connect-src` host in the CSP. Tell the user what is sent before the first request.
+13. **Street-level place context.** Done differently (Sep 2026), without reverse geocoding: the
+    opt-in OpenFreeMap basemaps show street, shop and place names, so the viewer can recognise a
+    place, and a place's details (side panel; a click on the map, the list or the timetable opens
+    them) have Google Maps and OpenStreetMap links, which send one coordinate pair on click. A
+    place clicked on the map is added to the list and scrolled into view. Automatic names would
+    still need a geocoder and a new host.
 14. Mobile layout (narrow screens) is not checked. The CSS has a breakpoint that stacks the views.
 15. **Brushing a ten-year export** recomputes all views on each brush frame: about 150 ms per
     step in headless Chromium, of which `compute()` is 40–100 ms. Check it on a real GPU first. If

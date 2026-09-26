@@ -140,17 +140,30 @@ function parseIOS(arr, r) {
     }
   }
 }
+/* GPX without DOMParser (it does not exist in the worker that reads files). Only a few fields are
+   read: the metadata or first track name, each track's <type>, and each <trkpt>'s lat, lon and time.
+   Namespace prefixes, entities and CDATA are handled. */
+const xmlText = s => s.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').replace(/<[^>]+>/g, '')
+  .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+  .replace(/&#(x?)([0-9a-f]+);/gi, (_, x, n) => String.fromCodePoint(parseInt(n, x ? 16 : 10))).replace(/&amp;/g, '&').trim();
+const tagText = (s, name) => { const m = s.match(new RegExp(`<(?:[\\w-]+:)?${name}\\b[^>]*>([\\s\\S]*?)</(?:[\\w-]+:)?${name}\\s*>`, 'i')); return m ? xmlText(m[1]) : null; };
+const attr = (s, name) => { const m = s.match(new RegExp(`\\b${name}\\s*=\\s*["']([^"']*)["']`, 'i')); return m ? +m[1] : NaN; };
 function parseGPX(text, fname) {
-  const doc = new DOMParser().parseFromString(text, 'application/xml');
-  if (doc.querySelector('parsererror')) throw new Error(`${fname} is not valid GPX.`);
-  const name = doc.querySelector('metadata > name')?.textContent?.trim() || doc.querySelector('trk > name')?.textContent?.trim();
+  if (!/<(?:[\w-]+:)?gpx\b/i.test(text.slice(0, 4000))) throw new Error(`${fname} is not valid GPX.`);
+  const trks = text.split(/<(?:[\w-]+:)?trk(?=[\s>])/i).slice(1);
+  // a track's own name and type come before its first segment
+  const head = t => t.split(/<(?:[\w-]+:)?trkseg\b/i)[0];
+  const meta = text.match(/<(?:[\w-]+:)?metadata\b[\s\S]*?<\/(?:[\w-]+:)?metadata\s*>/i);
+  const name = (meta && tagText(meta[0], 'name')) || (trks[0] && tagText(head(trks[0]), 'name'));
   const r = newRaw(name && name.length < 40 ? name : fname.replace(/\.gpx$/i, ''), 'gpx');
-  const types = [...doc.getElementsByTagName('trk')].map(t => t.getElementsByTagName('type')[0]?.textContent?.trim()).filter(Boolean);
+  const types = trks.map(t => tagText(head(t), 'type')).filter(Boolean);
   if (types.length) { const g = modeGroup(types[0]); if (g !== 'other' && types.every(x => modeGroup(x) === g)) { r.modeHint = g; r.modeHintRaw = types[0]; } }
-  for (const p of doc.getElementsByTagName('trkpt')) {
-    const tEl = p.getElementsByTagName('time')[0]; if (!tEl) continue;
-    const tt = ptime(tEl.textContent.trim()); if (!tt) continue;
-    addPt(r, tt.t, +p.getAttribute('lat'), +p.getAttribute('lon'), -1, tt.off);
+  const re = /<(?:[\w-]+:)?trkpt\b([^>]*?)(\/?)>([\s\S]*?)(?=<(?:[\w-]+:)?trkpt\b|<\/(?:[\w-]+:)?trkseg\s*>|$)/gi;
+  for (let m; (m = re.exec(text));) {
+    if (m[2]) continue; // <trkpt/> has no time
+    const tm = tagText(m[3], 'time'); if (!tm) continue;
+    const tt = ptime(tm); if (!tt) continue;
+    addPt(r, tt.t, attr(m[1], 'lat'), attr(m[1], 'lon'), -1, tt.off);
   }
   return r;
 }

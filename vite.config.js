@@ -29,11 +29,11 @@ function gazetteer() {
 const CSP = [
   "default-src 'none'",
   "script-src 'self'",
-  'worker-src blob:',                                    // MapLibre starts its worker from a blob
+  "worker-src 'self' blob:",                             // our file reader (src/fileWorker.js); MapLibre's worker is a blob
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   'font-src https://fonts.gstatic.com',
-  "img-src 'self' data: blob: https://*.basemaps.cartocdn.com",
-  'connect-src https://*.basemaps.cartocdn.com',         // street tiles, only when that layer is on
+  "img-src 'self' data: blob: https://*.basemaps.cartocdn.com https://tiles.openfreemap.org",
+  'connect-src https://*.basemaps.cartocdn.com https://tiles.openfreemap.org', // online basemaps, only when one is chosen
   "base-uri 'none'", "form-action 'none'"
 ].join('; ');
 function csp() {
@@ -58,5 +58,7 @@ export default defineConfig({
   optimizeDeps: {
     include: ['maplibre-gl', 'd3', 'three', 'three/examples/jsm/controls/OrbitControls.js', '@turf/turf', 'topojson-client', 'jszip', 'animejs/lib/anime.es.js']
   },
+  // the file reader is a module worker: it loads JSZip on demand, which needs the es format
+  worker: { format: 'es' },
   build: { chunkSizeWarningLimit: 2500 }
 });

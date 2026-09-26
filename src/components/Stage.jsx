@@ -5,14 +5,14 @@ import { selectPlace } from '../actions.js';
 import { createMarey, LABEL_W } from '../marey/marey.jsx';
 import { MODES, cssv, inkOf, modeColor, hourStops } from '../lib/colors.js';
 import { visibleSources } from '../lib/analytics.js';
-import { createMap, fitAll, fitHome, onMapMove, setView } from '../map/mapView.jsx';
+import { BASEMAPS, createMap, fitAll, fitHome, onMapMove, setView } from '../map/mapView.jsx';
 import { createCube } from '../cube/cube.jsx';
 import { getClock, onClock } from '../playback.js';
 import Seg from './Seg.jsx';
 
 const LAYERS = [
   ['trails', 'Trips'], ['heat', 'Density of records'], ['places', 'Places, sized by time spent'],
-  ['flows', 'Flows between places'], ['ellipse', 'Activity space (std. ellipse)'], ['streets', 'Street map (online)']
+  ['flows', 'Flows between places'], ['ellipse', 'Activity space (std. ellipse)']
 ];
 
 export default function Stage() {
@@ -40,7 +40,7 @@ export default function Stage() {
 }
 
 function Layers() {
-  const layers = useStore(s => s.layers);
+  const layers = useStore(s => s.layers), basemap = useStore(s => s.basemap);
   const [open, setOpen] = useState(false);
   const pop = useRef(null), btn = useRef(null);
   useEffect(() => {
@@ -55,7 +55,11 @@ function Layers() {
       <button className="btn" id="layersBtn" ref={btn} aria-expanded={open} onClick={() => setOpen(o => !o)}>Layers</button>
       <div className="layers-pop" id="layersPop" ref={pop} hidden={!open}>
         {LAYERS.map(([k, l]) => <label key={k} className="chk"><input type="checkbox" data-l={k} checked={layers[k]} onChange={e => set(k, e.target.checked)} /> {l}</label>)}
-        <div className="note">Street tiles come from an online server. Keep this off to stay fully offline. The built-in outline map shows coastlines only at country scale.</div>
+        <fieldset className="basemaps">
+          <legend>Basemap</legend>
+          {BASEMAPS.map(([k, l]) => <label key={k} className="chk"><input type="radio" name="basemap" data-b={k} checked={basemap === k} onChange={() => setState({ basemap: k })} /> {l}</label>)}
+        </fieldset>
+        <div className="note">The outline map is built in and works offline, but shows coastlines only at country scale. The other basemaps load map tiles from CARTO or OpenFreeMap: that server sees which area of the map you view, but none of your location data. Zoom in with the detailed basemap to see the shops and places around one of yours.</div>
       </div>
     </div>
   );

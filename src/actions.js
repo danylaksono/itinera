@@ -112,12 +112,34 @@ async function ingest(raws) {
   await rebuildAll();
   if (!first) fitAll(true);
 }
+/* Reading and parsing run in a worker (src/fileWorker.js), so a large file does not freeze the page.
+   If the worker cannot start (an old browser, or a policy that blocks it), the same code runs here. */
+function readFiles(files) {
+  let w;
+  try { w = new Worker(new URL('./fileWorker.js', import.meta.url), { type: 'module' }); }
+  catch (e) { return loadFiles(files, busyStep); }
+  return new Promise((resolve, reject) => {
+    let started = false;
+    w.onmessage = ({ data: m }) => {
+      started = true;
+      if (m.type === 'step') { busyStep(m.step, m.sub); return; }
+      w.terminate();
+      if (m.type === 'done') resolve(m); else reject(new Error(m.message));
+    };
+    w.onerror = e => {
+      e.preventDefault(); w.terminate();
+      if (started) reject(new Error(e.message || 'the file reader stopped.'));
+      else loadFiles(files, busyStep).then(resolve, reject); // the worker did not load
+    };
+    w.postMessage({ files: [...files] });
+  });
+}
 export async function handleFiles(files) {
   if (!files || !files.length) return;
   setState({ landErr: '' });
   busyStep('Reading files');
   try {
-    const { raws, errors, skipped } = await loadFiles(files, busyStep);
+    const { raws, errors, skipped } = await readFiles(files);
     if (!raws.length) {
       showError(errors.length ? errors.join(' ') : `No location data was found${skipped ? ` in ${files.length} file${files.length === 1 ? '' : 's'}` : ''}. Load Timeline.json, location-history.json, Records.json, Semantic Location History files, GPX tracks or a Takeout .zip.`);
       return;

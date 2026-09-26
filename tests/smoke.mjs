@@ -5,8 +5,9 @@ import { serve, launch, attachLogs, loadSample, waitFor, loaded } from './common
 const site = await serve();
 const b = await launch();
 const pg = await b.newPage({ viewport: { width: 1440, height: 900 } });
-const logs = [];
+const logs = [], workers = [];
 attachLogs(pg, logs);
+pg.on('worker', w => workers.push(w.url())); // the file reader runs in a worker (src/fileWorker.js)
 await loadSample(pg, site.url);
 
 const r = await pg.evaluate(() => {
@@ -74,6 +75,8 @@ await pg.keyboard.press('Escape'); await pg.waitForTimeout(500);
 // selecting a row filters to that place but keeps every row (the chart ignores its own place filter for rows)
 await pg.click('#marey .mrow[data-k=work]'); await pg.waitForTimeout(1500);
 r.mareyPlace = await pg.evaluate(() => ({ place: window.__itinera.store.filter.place != null, rows: document.querySelectorAll('#marey .mrow').length }));
+// the selected place's details: links that open another site only on click, and an offline basemap by default
+r.placeLinks = await pg.evaluate(() => [...document.querySelectorAll('.place[aria-expanded="true"] .place-links a')].filter(a => a.target === '_blank' && /noopener/.test(a.rel)).length === 2 && window.__itinera.store.basemap === 'outline');
 await pg.keyboard.press('Escape'); await pg.waitForTimeout(500);
 await pg.click('#viewSeg button[data-v=map]'); await pg.waitForTimeout(1000);
 // a Takeout-style .zip through the real file input: the zip reader works under the policy
@@ -85,6 +88,7 @@ await pg.setInputFiles('#fileInput', { name: 'takeout.zip', mimeType: 'applicati
 await pg.waitForTimeout(500);
 await waitFor(pg, loaded);
 r.zipOk = await pg.evaluate("window.__itinera.store.sources.some(s => s.name === 'Zip ride')");
+r.fileWorker = workers.some(u => /fileWorker/.test(u));
 
 console.log(JSON.stringify(r, null, 1));
 const errs = logs.filter(l => l.startsWith('PAGEERROR') || l.startsWith('error'));
@@ -93,8 +97,8 @@ for (const l of logs) console.log(l);
 const blocked = await pg.evaluate("fetch('https://example.com/').then(() => false, () => true)");
 console.log('request to another site blocked:', blocked);
 const ok = !errs.length && r.home === 'Home' && r.work === 'Work' && r.kpi.countries === 2 && r.places === 30
-  && r.sources.length === 3 && r.cubeFloorOk && r.cubeDrawn && +String(r.cubeHome).replace(',', '') > 1000 && r.mapViewKept && r.landDrawn && r.trailsRendered && r.modeFilter && r.escapeClears && r.brushFilter && r.zipOk
-  && r.marey.home && r.marey.work && r.marey.trips > 1000 && r.marey.runs > 0 && r.mareyBrushOk && r.mareyPlace.place && r.mareyPlace.rows > 5 && blocked
+  && r.sources.length === 3 && r.cubeFloorOk && r.cubeDrawn && +String(r.cubeHome).replace(',', '') > 1000 && r.mapViewKept && r.landDrawn && r.trailsRendered && r.modeFilter && r.escapeClears && r.brushFilter && r.zipOk && r.fileWorker
+  && r.marey.home && r.marey.work && r.marey.trips > 1000 && r.marey.runs > 0 && r.mareyBrushOk && r.mareyPlace.place && r.mareyPlace.rows > 5 && r.placeLinks && blocked
   && r.together.includes('98%') && r.offsets.length === 2 && r.offsets.every(o => o.lisbon && !o.browser && o.nearby > 0)
   // one person: phone trips (9,328 km) + watch runs (553 km); the work phone's copies are not added
   && Math.abs(r.kpi.dist / 1000 - 9881) < 100 && r.kpiText.slice(0, 3).every(t => t !== '0');

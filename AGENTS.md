@@ -231,7 +231,9 @@ the calendar and rhythm grid, and the cube clock plane. Only the clock text re-r
 The floor is the current map view (web mercator, longest side = 100 units). The height is
 the selected time range (72 units). Trips are `LineSegments` with vertex colours and a
 ground shadow. Stays are an `InstancedMesh` of cylinders. Place names and time ticks are
-HTML labels projected each frame, in a box above the canvas. The module renders on demand only
+HTML labels projected each frame, in a box above the canvas. The time labels go on the vertical
+edge that is leftmost on screen, and a label that would overlap one already placed is hidden
+(`placeLabels()`). The caption is a strip above the plot. The module renders on demand only
 (on OrbitControls `change`, clock updates or rebuilds). `createCube(el, lblBox, setCaption)` is
 called the first time the cube is shown and returns `{build, schedule, setClock, show, destroy}`.
 It must fail gracefully when there is no WebGL. three.js is pinned at 0.147 because r152 and
@@ -346,18 +348,18 @@ Semantic Location History), export, the layer toggles, mobile layout.
 
 ## 9. Known issues and next tasks (in priority order)
 
-1. **Cube framing.** `fitCamera()` now fits the box. Check it again in the narrow split panel.
-2. **Cube caption.** The caption overlaps the lines. Give `.cube-cap` a panel background, or
-   move it to a strip under the canvas.
-3. **Cube time labels.** The tick labels on the back-left edge are off-screen or hidden.
-   Make sure that they show in the default view.
-4. **Cube clipping.** Some trip lines go outside the box, although the six clipping planes
-   are set. Check the plane signs and `renderer.localClippingEnabled`, or clip the segments
-   on the CPU in `build()`.
-5. **Cube place labels overlap** (for example "Home" and "Rato climbing gym"). Add simple
-   collision avoidance (drop the lower-ranked label).
-6. **Cube stays** are hard to see among many trips at the one-year scale. Consider thicker
-   columns, trips drawn with less opacity when the time span is long, or a "stays only" toggle.
+1. **Cube framing.** Done (Sep 2026): `fitCamera()` projects the 8 box corners and moves the
+   camera until they fill about 85% of the view. In the wide cube view it is limited by height.
+2. **Cube caption.** Done: a strip above the plot (`.cube-cap`, `.cube-plot`), as in the timetable.
+   In cube view the legend sits under the plot too.
+3. **Cube time labels.** Done: `placeLabels()` puts them on the vertical edge that is leftmost on
+   screen, re-chosen each frame, with a halo.
+4. **Cube clipping.** Checked, not reproduced: the plane signs are right (each plane keeps the
+   inside) and `localClippingEnabled` is on. Look again only if it shows in a turned view.
+5. **Cube place labels overlap.** Done: labels are placed in order (time, then places by rank),
+   and one that would overlap a placed label is hidden. Up to 10 places are labelled.
+6. **Cube stays.** Improved: wider columns, and trips drawn fainter when the span is long
+   (`tripAlpha`, down to 0.28; the caption says so). A "stays only" toggle is still an option.
 7. **Calendar with many years.** A ten-year export shows about 3 cramped years. The year
    label overlaps the month axis of the year above, and the last block is clipped.
 8. **Timeline axis.** The first tick label is clipped (for example "017").

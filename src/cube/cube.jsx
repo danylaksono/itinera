@@ -59,6 +59,22 @@ export function createCube(el, lblBox, setCaption) {
     const distance = radius / Math.sin(Math.min(vHalf, hHalf)) * 1.08;
     controls.target.copy(target);
     camera.position.copy(target).add(offset.normalize().multiplyScalar(distance));
+    // The sphere is loose for a flat box: project the 8 corners and move closer until they fill
+    // about 85% of the view (room for the time labels on the left).
+    const dir = offset.clone().normalize(), p = new THREE.Vector3();
+    let d = distance;
+    for (let it = 0; it < 4; it++) {
+      camera.position.copy(target).addScaledVector(dir, d);
+      camera.lookAt(target); camera.updateMatrixWorld(); camera.updateProjectionMatrix();
+      let m = 0;
+      for (const x of [-1, 1]) for (const y of [0, 1]) for (const z of [-1, 1]) {
+        p.set(x * geo.X / 2, y * geo.H, z * geo.Z / 2).project(camera);
+        m = Math.max(m, Math.abs(p.x), Math.abs(p.y));
+      }
+      if (!(m > 0)) break;
+      d = clamp(d * m / 0.85, controls.minDistance, controls.maxDistance);
+    }
+    camera.position.copy(target).addScaledVector(dir, d);
     controls.update();
   }
   function disposeTree(o) {
@@ -116,6 +132,8 @@ export function createCube(el, lblBox, setCaption) {
     // ---- trips (filtered) as lines with vertex colour + ground shadow
     const fallback = activeSources(st)[0];
     const colorOf = t => st.colorBy === 'mode' ? modeColor(t.mode) : st.colorBy === 'hour' ? hourColor(t.hod) : trackColor(st, srcById(st, t.src) || fallback);
+    // many months of trips hide the stays: draw them fainter as the time span grows
+    const tripAlpha = clamp(0.9 * Math.sqrt(45 * DAY / Math.max(DAY, b - a)), 0.28, 0.9);
     const P = [], C = [], SH = [];
     let segs = 0, nTrips = 0;
     const trips = st.res.T.filter(t => t.t1 >= a && t.t0 <= b);
@@ -142,7 +160,7 @@ export function createCube(el, lblBox, setCaption) {
       const g1 = new THREE.BufferGeometry();
       g1.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
       g1.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
-      root.add(new THREE.LineSegments(g1, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9, clippingPlanes: clip })));
+      root.add(new THREE.LineSegments(g1, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: tripAlpha, depthWrite: false, clippingPlanes: clip })));
       const g2 = new THREE.BufferGeometry();
       g2.setAttribute('position', new THREE.Float32BufferAttribute(SH, 3));
       root.add(new THREE.LineSegments(g2, new THREE.LineBasicMaterial({ color: col(ink), transparent: true, opacity: 0.16, clippingPlanes: clip })));
@@ -152,9 +170,9 @@ export function createCube(el, lblBox, setCaption) {
     if (stays.length > 8000) stays = stays.slice().sort((p, q) => q.dur - p.dur).slice(0, 8000);
     geo.stays = stays;
     if (stays.length) {
-      const r = clamp(Math.min(X, Z) / 160, 0.25, 0.9);
+      const r = clamp(Math.min(X, Z) / 110, 0.35, 1.3);
       const cyl = new THREE.CylinderGeometry(1, 1, 1, 10, 1, false);
-      const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.82 });
+      const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.9 });
       const inst = new THREE.InstancedMesh(cyl, mat, stays.length);
       const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3(), ps = new THREE.Vector3();
       const homes = st.ctx.homeSet;
@@ -171,7 +189,7 @@ export function createCube(el, lblBox, setCaption) {
       root.add(inst); geo.inst = inst;
     } else geo.inst = null;
     // ---- place labels on the floor (top places inside the view)
-    const inView = st.res.places.map(o => st.ctx.places[o.i]).filter(p => inside(p.lat, p.lon)).slice(0, 6);
+    const inView = st.res.places.map(o => st.ctx.places[o.i]).filter(p => inside(p.lat, p.lon)).slice(0, 10); // overlapping ones are hidden in placeLabels
     for (const p of inView) addLabel(new THREE.Vector3(toX(p.lon), 0, toZ(p.lat)), p.label, 'place');
     // ---- time ticks on the back-left edge
     const off = offNear(st, a);
@@ -180,8 +198,8 @@ export function createCube(el, lblBox, setCaption) {
     const tp = [];
     for (const tk of ticks) {
       const y = sc(tk);
-      tp.push(-X / 2, y, -Z / 2, -X / 2 - 2, y, -Z / 2, -X / 2, y, -Z / 2, X / 2, y, -Z / 2);
-      addLabel(new THREE.Vector3(-X / 2 - 2.5, y, -Z / 2), fmt(tk), 'time');
+      tp.push(-X / 2, y, -Z / 2, X / 2, y, -Z / 2, -X / 2, y, -Z / 2, -X / 2, y, Z / 2);
+      addLabel(new THREE.Vector3(0, y, 0), fmt(tk), 'time');
     }
     if (tp.length) {
       const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(tp, 3));
@@ -202,7 +220,7 @@ export function createCube(el, lblBox, setCaption) {
       return m;
     });
     const d0 = Math.floor((a + off * MIN) / DAY), d1 = Math.floor((b + offNear(st, b) * MIN) / DAY);
-    setCaption({ from: fmtDay(d0), to: fmtDay(d1), split: st.view === 'split', nTrips });
+    setCaption({ from: fmtDay(d0), to: fmtDay(d1), split: st.view === 'split', nTrips, faint: tripAlpha < 0.85 });
     fitCamera();
     built = true;
     placeClock();
@@ -213,16 +231,35 @@ export function createCube(el, lblBox, setCaption) {
     d.className = 'cube-lbl' + (kind === 'place' ? ' is-place' : '');
     d.textContent = text;
     lblBox.appendChild(d);
-    labels.push({ v, d });
+    labels.push({ v, d, kind, w: 0 });
   }
+  /* Time labels go on the vertical edge that is leftmost on screen (outside the data, whatever the
+     turn). Labels are placed in order (time first, then places by rank); a label that would overlap
+     one already placed is hidden. */
   function placeLabels() {
     const w = el.clientWidth, h = el.clientHeight;
-    const p = new THREE.Vector3();
-    for (const l of labels) {
-      p.copy(l.v).project(camera);
-      const vis = p.z < 1 && Math.abs(p.x) < 1.1 && Math.abs(p.y) < 1.1;
+    const p = new THREE.Vector3(), taken = [];
+    let edge = null;
+    if (geo) {
+      let best = Infinity;
+      for (const [cx, cz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+        p.set(cx * geo.X / 2, geo.H / 2, cz * geo.Z / 2).project(camera);
+        if (p.x < best) { best = p.x; edge = [cx * (geo.X / 2 + 1.5), cz * (geo.Z / 2 + 1.5)]; }
+      }
+    }
+    for (const l of [...labels.filter(l => l.kind === 'time'), ...labels.filter(l => l.kind !== 'time')]) {
+      if (l.kind === 'time' && edge) p.set(edge[0], l.v.y, edge[1]); else p.copy(l.v);
+      p.project(camera);
+      let vis = p.z < 1 && Math.abs(p.x) < 1.1 && Math.abs(p.y) < 1.1;
+      const x = (p.x + 1) / 2 * w, y = (1 - p.y) / 2 * h;
+      if (vis) {
+        l.w ||= l.d.offsetWidth || 60;
+        const r = l.kind === 'time' ? [x - l.w, y - 8, x, y + 8] : [x + 6, y - 8, x + 6 + l.w, y + 8];
+        if (taken.some(q => r[0] < q[2] && r[2] > q[0] && r[1] < q[3] && r[3] > q[1])) vis = false;
+        else taken.push(r);
+      }
       l.d.style.display = vis ? '' : 'none';
-      if (vis) { l.d.style.left = ((p.x + 1) / 2 * w).toFixed(1) + 'px'; l.d.style.top = ((1 - p.y) / 2 * h).toFixed(1) + 'px'; }
+      if (vis) { l.d.style.left = x.toFixed(1) + 'px'; l.d.style.top = y.toFixed(1) + 'px'; }
     }
   }
   function placeClock() {

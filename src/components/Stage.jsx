@@ -91,12 +91,14 @@ function CubeHost() {
     return () => { unsub(); unmove(); unclock(); cube?.destroy(); };
   }, []);
   return (
-    <div id="cube" ref={ref}>
+    <div id="cube">
       <div className="cube-cap" id="cubeCap">
         {cap?.error ? <><b>Space-time cube</b><br />{cap.error}</>
-          : cap && <><b>Space-time cube.</b> Time goes up, from {cap.from} at the floor to {cap.to} at the top. The floor is the {cap.split ? 'map view on the left' : 'last map view'}. Columns are stays, lines are trips ({cap.nTrips.toLocaleString('en-GB')} shown). Drag to turn, scroll to zoom, double-click to reset.</>}
+          : cap && <><b>Space-time cube.</b> Time goes up, from {cap.from} at the floor to {cap.to} at the top. The floor is the {cap.split ? 'map view on the left' : 'last map view'}. Columns are stays, lines are trips ({cap.nTrips.toLocaleString('en-GB')} shown{cap.faint ? ', drawn faint over a long period so the stays show' : ''}). Drag to turn, scroll to zoom, double-click to reset.</>}
       </div>
-      <div ref={lbl} style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}></div>
+      <div className="cube-plot" ref={ref}>
+        <div ref={lbl} style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}></div>
+      </div>
     </div>
   );
 }

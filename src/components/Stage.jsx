@@ -173,6 +173,7 @@ function MareyHost() {
 function Legend() {
   const colorBy = useStore(s => s.colorBy), mode = useStore(s => s.mode), res = useStore(s => s.res), layers = useStore(s => s.layers);
   useStore(s => s.sources); useStore(s => s.hidden); useStore(s => s.dark);
+  const session = useStore(s => s.session);
   const st = getState();
   const items = [];
   if (colorBy === 'device') {
@@ -185,6 +186,7 @@ function Legend() {
     const grad = hourStops().map(([h, c]) => `${c} ${h / 24 * 100}%`).join(',');
     items.push(<span key="st">Start time</span>, <span key="ramp">0h <i className="ramp" style={{ background: `linear-gradient(90deg,${grad})` }}></i> 24h</span>);
   }
+  if (layers.trails && session) items.push(<span key="age"><i style={{ width: 28, background: `linear-gradient(90deg,color-mix(in srgb,${cssv('--ink')} 18%,transparent),${cssv('--ink')})` }}></i>Older to recent trips</span>);
   if (layers.trails && colorBy !== 'mode') items.push(<span key="fl"><i style={{ background: `repeating-linear-gradient(90deg,${cssv('--ink-2')} 0 4px,transparent 4px 7px)` }}></i>Flight</span>);
   if (layers.trails && res?.T.some(t => t.mode !== 'flight' && t.path.length <= 2)) items.push(<span key="jump"><i style={{ height: 2, background: `repeating-linear-gradient(90deg,${cssv('--ink-2')} 0 1.5px,transparent 1.5px 5px)` }}></i>No route recorded</span>);
   if (layers.places) items.push(<span key="pl"><svg width="14" height="14"><circle cx="7" cy="7" r="5" fill={cssv('--panel-2')} stroke={cssv('--ink')} strokeWidth="1" /></svg>Place (size = time)</span>);

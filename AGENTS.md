@@ -222,7 +222,7 @@ The clock changes every frame, so it is not React state. `state.playing`, `state
 `state.speed`, `state.skip` and `state.follow` are. `speedRate(v)` is a log scale from 5 min/s to
 60 days/s. "Skip time at places" jumps across the gaps between moving intervals
 (`ctx.moving`). Each frame, `onClock` subscribers update the device heads, the fading tails, the
-progressive reveal of trails (throttled to 140 ms), the timeline playhead, the current cell in
+progressive reveal of trails with an afterglow on recent trips (throttled to 140 ms), the timeline playhead, the current cell in
 the calendar and rhythm grid, and the cube clock plane. Only the clock text re-renders
 (`useClock()`).
 
@@ -376,8 +376,10 @@ Semantic Location History), export, the layer toggles, mobile layout.
    puts each period in one local frame. In the map floor, the caption suggests it when the view is
    wider than about 1,000 km. Possible next steps: an adaptive (log) radius, so both the routine
    and day trips fit, and places labelled once per home period.
-10. **Progressive reveal in playback** looks as if nothing changes when the routes repeat.
-    Consider a short "recent trips" highlight in addition to the tail.
+10. **Progressive reveal in playback.** Done (Sep 2026): an afterglow (`trailAges()` in
+    `mapView.jsx`). While playing, the trail opacity interpolates on each trip's `t1`: trips from
+    the last ~4 s of playback (6 h to 60 days of data, by speed) are bright, and older ones fade to
+    22% of the usual opacity. The legend shows "Older to recent trips" during playback.
 11. **Load time.** About 1 s of JS work for the sample. `makeSample()` takes about 0.7 s. For
     large Records.json files (hundreds of MB), move parsing and `finalize()` into a Web Worker
     (Vite supports `new Worker(new URL('./worker.js', import.meta.url), { type: 'module' })`;

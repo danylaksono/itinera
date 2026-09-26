@@ -261,6 +261,20 @@ function applyMapFilters(st) {
   map.setFilter('trails-jump', [...tf, ['==', ['get', 'jump'], 1]]);
   map.setFilter('trails-fl', [...tf, ['==', ['get', 'fl'], 1]]);
   map.setFilter('heat', baseFilter(st, 'heat'));
+  trailAges(st);
+}
+/* Playback afterglow: a repeated route (the daily commute) is already drawn, so revealing it again
+   shows no change. While playing, trips from the last few seconds of playback are bright and older
+   ones fade to a faint base; the window follows the speed. Outside playback, the usual opacity. */
+const TRAIL_OPACITY = { trails: 0.62, 'trails-fl': 0.7, 'trails-jump': 0.5 };
+function trailAges(st) {
+  const c = getClock(), on = st.session && c != null;
+  const recent = clamp(speedRate(st.speed) * 4, 6 * HOUR, 60 * DAY);
+  for (const [id, base] of Object.entries(TRAIL_OPACITY)) {
+    map.setPaintProperty(id, 'line-opacity', on
+      ? ['interpolate', ['linear'], ['get', 't1'], c - recent, base * 0.22, c, Math.min(1, base * 1.45)]
+      : base);
+  }
 }
 function updateMap(st) {
   if (!st.res) return;

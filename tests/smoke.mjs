@@ -45,6 +45,12 @@ r.mapViewKept = before.every((v, i) => Math.abs(v - back[i]) < 1e-3);
 r.landDrawn = await pg.evaluate("(m => (m.getSource('land').serialize().data.features?.length ?? 0) > 0 && m.getSource('borders').serialize().data.type !== 'FeatureCollection')(window.__itinera.map)");
 // trails drawn = the MapLibre worker runs under the page's policy
 r.trailsRendered = await pg.evaluate("window.__itinera.map.queryRenderedFeatures({ layers: ['trails'] }).length > 0");
+// bundled trips (schematic): bundles replace the single trips, and switch back
+await pg.click('#layersBtn'); await pg.click('#bundleChk'); await pg.click('#layersBtn');
+await pg.waitForTimeout(600); await waitFor(pg, 'window.__itinera.store.bundleInfo && document.querySelector("#busy").hidden', 60000);
+r.bundles = await pg.evaluate("(m => ({ info: window.__itinera.store.bundleInfo, on: m.getLayoutProperty('bundles', 'visibility') === 'visible' && m.getLayoutProperty('trails', 'visibility') === 'none' }))(window.__itinera.map)");
+await pg.click('#layersBtn'); await pg.click('#bundleChk'); await pg.click('#layersBtn'); await pg.waitForTimeout(800);
+r.bundlesOff = await pg.evaluate("window.__itinera.map.getLayoutProperty('bundles', 'visibility') === 'none' && window.__itinera.map.getLayoutProperty('trails', 'visibility') === 'visible'");
 // a filter from one view reaches the others: select a travel mode
 await pg.click('.mode-row[data-k=walk]');
 await pg.waitForTimeout(500);
@@ -97,7 +103,7 @@ for (const l of logs) console.log(l);
 const blocked = await pg.evaluate("fetch('https://example.com/').then(() => false, () => true)");
 console.log('request to another site blocked:', blocked);
 const ok = !errs.length && r.home === 'Home' && r.work === 'Work' && r.kpi.countries === 2 && r.places === 30
-  && r.sources.length === 3 && r.cubeFloorOk && r.cubeDrawn && +String(r.cubeHome).replace(',', '') > 1000 && r.mapViewKept && r.landDrawn && r.trailsRendered && r.modeFilter && r.escapeClears && r.brushFilter && r.zipOk && r.fileWorker
+  && r.sources.length === 3 && r.cubeFloorOk && r.cubeDrawn && +String(r.cubeHome).replace(',', '') > 1000 && r.mapViewKept && r.landDrawn && r.trailsRendered && r.modeFilter && r.escapeClears && r.brushFilter && r.bundles.on && r.bundles.info.bundled > 20 && r.bundlesOff && r.zipOk && r.fileWorker
   && r.marey.home && r.marey.work && r.marey.trips > 1000 && r.marey.runs > 0 && r.mareyBrushOk && r.mareyPlace.place && r.mareyPlace.rows > 5 && r.placeLinks && blocked
   && r.together.includes('98%') && r.offsets.length === 2 && r.offsets.every(o => o.lisbon && !o.browser && o.nearby > 0)
   // one person: phone trips (9,328 km) + watch runs (553 km); the work phone's copies are not added

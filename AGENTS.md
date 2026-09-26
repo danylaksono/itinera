@@ -84,6 +84,7 @@ src/lib/colors.js     MODES, INKS_L/INKS_D, HOUR_STOPS, isDark, cssv, inkOf, mod
 src/lib/analytics.js  buildContext() (places, roles), markDuplicates(), passes(), compute(), togetherness(), headAt()
 src/lib/sample.js     makeSample(): synthetic Lisbon year, emitted in three real export formats
 src/lib/marey.js      mareyData(): rows and segments for the place timetable (pure)
+src/lib/bundle.js     fdeb() (force-directed edge bundling) and bundleTrips(): the map's bundled view (pure)
 src/map/mapView.jsx   MapLibre map (imperative): layers, tooltips, framing, the map side of playback
 src/cube/cube.jsx     space-time cube (three.js, imperative)
 src/marey/marey.jsx   place timetable, a Marey chart (canvas and D3, imperative)
@@ -211,6 +212,20 @@ The data layers are `heat`, `ellipse-*`, `trails`, `trails-fl` (flights, dashed)
 filters are MapLibre expressions made by `baseFilter()`. `sync()` compares the new state with
 the last one: new `ctx` → `setMapData()`; new `res`, colours, layers or visibility →
 `updateMap()`; theme → `restyleMap()`.
+
+Bundled trips (`state.bundle`, Layers › Bundle trips; off by default; the owner chose to bundle
+recorded GPS paths too). `bundleTrips()` groups the filtered trips (`res.T`) by place pair, in
+either direction, plus the colour key (device, mode, or a 3-hour block). An end with no stay snaps to
+a 200 m grid. It bundles the 700 most travelled groups with force-directed edge bundling (Holten and
+van Wijk 2009). Each edge starts from the recorded path of its median-length trip, is resampled
+to 16 points, and handles reversed edges; heavier edges pull more, the step is relative to each
+edge's own length, and a 1.5 s budget caps the work. Rarer pairs keep one recorded route, and round
+trips keep theirs, both drawn fainter. Flights stay as their dashed arcs. The `bundles` layer
+replaces `trails` and `trails-jump`, with width by number of trips. The legend and tooltip say
+"schematic, not the route taken". `scheduleBundles()` runs it 300 ms after `res` or the colours
+change, behind the busy overlay, and only if they changed. During playback the single trips come
+back (the reveal needs them). On a ten-year file it takes about 1–1.5 s (700 of about 3,000 pairs).
+The effect is strongest where trips repeat between the same places.
 
 Basemap (`state.basemap`, Layers › Basemap): `'outline'` (built in, offline), `'carto'` (raster),
 `'ofm'` (OpenFreeMap Positron, or Dark in the dark theme) or `'ofm-poi'` (OpenFreeMap Liberty, with
@@ -446,6 +461,9 @@ Semantic Location History), export, the layer toggles, mobile layout.
     (for example, render the counts into a buffer and map them through a ramp), or a default that
     stacks only the latest year. The rows could also offer "order by travel adjacency" as an
     option.
+20. **Bundled trips.** Possible next steps: move `bundleTrips()` into a worker (it blocks for about
+    1 s on years of data); a strength setting (step and compatibility threshold); and bundling the
+    "Flows between places" layer with the same code.
 
 ## 10. Publishing
 

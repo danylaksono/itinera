@@ -13,6 +13,7 @@ let state = {
   cubeFloor: 'map',           // space-time cube floor: 'map' (the map view) | 'home' (km around the home of each time)
   mareyLayout: 'days',        // place timetable: 'days' (stacked on 24 h) | 'calendar'
   layers: { trails: true, heat: true, places: true, flows: false, ellipse: false },
+  bundle: false, bundleInfo: null, // bundled trips on the map (schematic); bundleInfo = { pairs, bundled, loops }
   basemap: 'outline',         // 'outline' (offline) | 'carto' | 'ofm' | 'ofm-poi' (online, opt-in: see mapView.jsx)
   filter: NO_FILTER,
   ctx: null, res: null,

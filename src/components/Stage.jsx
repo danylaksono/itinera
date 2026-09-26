@@ -40,7 +40,7 @@ export default function Stage() {
 }
 
 function Layers() {
-  const layers = useStore(s => s.layers), basemap = useStore(s => s.basemap);
+  const layers = useStore(s => s.layers), basemap = useStore(s => s.basemap), bundle = useStore(s => s.bundle);
   const [open, setOpen] = useState(false);
   const pop = useRef(null), btn = useRef(null);
   useEffect(() => {
@@ -55,6 +55,7 @@ function Layers() {
       <button className="btn" id="layersBtn" ref={btn} aria-expanded={open} onClick={() => setOpen(o => !o)}>Layers</button>
       <div className="layers-pop" id="layersPop" ref={pop} hidden={!open}>
         {LAYERS.map(([k, l]) => <label key={k} className="chk"><input type="checkbox" data-l={k} checked={layers[k]} onChange={e => set(k, e.target.checked)} /> {l}</label>)}
+        <label className="chk" title="Groups trips by place pair and bundles them. Schematic: the lines leave the real streets."><input type="checkbox" id="bundleChk" checked={bundle} disabled={!layers.trails} onChange={e => setState({ bundle: e.target.checked })} /> Bundle trips (schematic)</label>
         <fieldset className="basemaps">
           <legend>Basemap</legend>
           {BASEMAPS.map(([k, l]) => <label key={k} className="chk"><input type="radio" name="basemap" data-b={k} checked={basemap === k} onChange={() => setState({ basemap: k })} /> {l}</label>)}
@@ -177,7 +178,7 @@ function MareyHost() {
 function Legend() {
   const colorBy = useStore(s => s.colorBy), mode = useStore(s => s.mode), res = useStore(s => s.res), layers = useStore(s => s.layers);
   useStore(s => s.sources); useStore(s => s.hidden); useStore(s => s.dark);
-  const session = useStore(s => s.session);
+  const session = useStore(s => s.session), bundle = useStore(s => s.bundle), bi = useStore(s => s.bundleInfo);
   const st = getState();
   const items = [];
   if (colorBy === 'device') {
@@ -190,9 +191,11 @@ function Legend() {
     const grad = hourStops().map(([h, c]) => `${c} ${h / 24 * 100}%`).join(',');
     items.push(<span key="st">Start time</span>, <span key="ramp">0h <i className="ramp" style={{ background: `linear-gradient(90deg,${grad})` }}></i> 24h</span>);
   }
+  if (layers.trails && bundle && !session) items.push(<span key="bundle" title={bi ? `${bi.bundled.toLocaleString('en-GB')} of ${bi.pairs.toLocaleString('en-GB')} place pairs are bundled (the most travelled). The rest, and ${bi.loops.toLocaleString('en-GB')} round trips, keep one recorded route, drawn fainter. Flights stay as arcs.` : ''}>
+    <i style={{ width: 22, height: 5, background: cssv('--ink-2') }}></i>Bundled trips, width = number of trips. Schematic, not the route taken</span>);
   if (layers.trails && session) items.push(<span key="age"><i style={{ width: 28, background: `linear-gradient(90deg,color-mix(in srgb,${cssv('--ink')} 18%,transparent),${cssv('--ink')})` }}></i>Older to recent trips</span>);
   if (layers.trails && colorBy !== 'mode') items.push(<span key="fl"><i style={{ background: `repeating-linear-gradient(90deg,${cssv('--ink-2')} 0 4px,transparent 4px 7px)` }}></i>Flight</span>);
-  if (layers.trails && res?.T.some(t => t.mode !== 'flight' && t.path.length <= 2)) items.push(<span key="jump"><i style={{ height: 2, background: `repeating-linear-gradient(90deg,${cssv('--ink-2')} 0 1.5px,transparent 1.5px 5px)` }}></i>No route recorded</span>);
+  if (layers.trails && !(bundle && !session) && res?.T.some(t => t.mode !== 'flight' && t.path.length <= 2)) items.push(<span key="jump"><i style={{ height: 2, background: `repeating-linear-gradient(90deg,${cssv('--ink-2')} 0 1.5px,transparent 1.5px 5px)` }}></i>No route recorded</span>);
   if (layers.places) items.push(<span key="pl"><svg width="14" height="14"><circle cx="7" cy="7" r="5" fill={cssv('--panel-2')} stroke={cssv('--ink')} strokeWidth="1" /></svg>Place (size = time)</span>);
   return <div className="legend" id="legend">{items}</div>;
 }

@@ -1,9 +1,10 @@
 /* MapLibre map: layers, tooltips and the map side of playback. Imperative: createMap() builds it on a
-   container, subscribes to the store and the clock, and returns a cleanup. The style is built in code
-   (no glyphs or symbol layers, which need the network). */
+   container, subscribes to the store and the clock, and returns a cleanup. The style is built in code,
+   with no glyphs or symbol layers of its own (they need the network); only the optional online
+   basemaps bring theirs. */
 import maplibregl from 'maplibre-gl';
 import { range, rgb } from 'd3';
-import { MIN, HOUR, DAY, hav, bisect, clamp, fmtKm, fmtDur, fmtLocal } from '../lib/util.js';
+import { MIN, HOUR, DAY, hav, bisect, clamp, sleep, fmtKm, fmtDur, fmtLocal } from '../lib/util.js';
 import { MODES, MODE_IDX, cssv, isDark, inkOf, modeColor, hourStops, trackColor } from '../lib/colors.js';
 import { WORLD } from '../lib/geo.js';
 import { activeSources, visibleSources, srcById, homeAt, playRange, headAt } from '../lib/analytics.js';
@@ -11,9 +12,10 @@ import { getState, setState, subscribe, toast } from '../store.js';
 import { getClock, onClock, speedRate } from '../playback.js';
 import { showTip, hideTip } from '../tip.jsx';
 import { selectPlace } from '../actions.js';
+import { bundleTrips } from '../lib/bundle.js';
 
 let map = null, ready = false;
-const M = { tailSrcs: new Set(), lastReveal: 0, bounds: null, quiet: false, fitted: false, world: false, basemapTimer: null, basemapWarned: false, basemapToken: 0 };
+const M = { tailSrcs: new Set(), lastReveal: 0, bounds: null, quiet: false, fitted: false, world: false, basemapTimer: null, basemapWarned: false, basemapToken: 0, bundleKey: null, bundleTimer: null };
 export const getMap = () => map;
 export const mapReady = () => ready;
 const empty = () => ({ type: 'FeatureCollection', features: [] });
@@ -78,7 +80,7 @@ export function createMap(container) {
   let prev = null, unsub = null, unclock = null;
   m.on('load', () => {
     const add = id => m.addSource(id, { type: 'geojson', data: empty() });
-    add('heat'); add('trails'); add('flows'); add('ellipse'); add('places'); add('heads');
+    add('heat'); add('trails'); add('bundles'); add('flows'); add('ellipse'); add('places'); add('heads');
     m.addLayer({ id: 'heat', type: 'heatmap', source: 'heat', maxzoom: 17, paint: {
       'heatmap-weight': 1,
       'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 2, 0.6, 9, 1, 15, 2],
@@ -91,6 +93,11 @@ export function createMap(container) {
     m.addLayer({ id: 'trails', type: 'line', source: 'trails', filter: ['==', ['get', 'src'], -999], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#888', 'line-width': tw, 'line-opacity': 0.62 } });
     m.addLayer({ id: 'trails-fl', type: 'line', source: 'trails', filter: ['==', ['get', 'src'], -999], layout: { 'line-cap': 'round' }, paint: { 'line-color': '#888', 'line-width': 1.3, 'line-opacity': 0.7, 'line-dasharray': [2, 2.5] } });
     m.addLayer({ id: 'trails-jump', type: 'line', source: 'trails', filter: ['==', ['get', 'src'], -999], paint: { 'line-color': '#888', 'line-width': 1, 'line-opacity': 0.5, 'line-dasharray': [0.5, 2.5] } });
+    // bundled trips (optional, schematic): width by number of trips
+    m.addLayer({ id: 'bundles', type: 'line', source: 'bundles', layout: { 'line-cap': 'round', 'line-join': 'round', visibility: 'none' }, paint: {
+      'line-color': '#888', 'line-width': ['interpolate', ['linear'], ['sqrt', ['get', 'n']], 1, 1, 4, 3, 12, 7, 30, 12],
+      'line-opacity': ['case', ['==', ['get', 'bundled'], 1], 0.62, 0.32]
+    } });
     m.addLayer({ id: 'flows', type: 'line', source: 'flows', layout: { 'line-cap': 'round' }, paint: { 'line-color': cssv('--ink'), 'line-opacity': 0.55, 'line-width': ['interpolate', ['linear'], ['get', 'n'], 1, 0.8, 20, 3, 200, 8] } });
     m.addLayer({ id: 'places', type: 'circle', source: 'places', paint: {
       'circle-radius': ['interpolate', ['linear'], ['sqrt', ['get', 'hrs']], 0, 2.5, 5, 5, 40, 14, 120, 24],
@@ -126,7 +133,7 @@ export function createMap(container) {
     if (st.dark !== p.dark && p.dark !== undefined) restyleMap(st);
     if (st.ctx !== p.ctx || st.merged !== p.merged) setMapData(st);
     else if (st.sources !== p.sources) restyleTails(st);
-    if (st.res !== p.res || st.colorBy !== p.colorBy || st.layers !== p.layers || st.hidden !== p.hidden || st.dark !== p.dark || st.sources !== p.sources) updateMap(st);
+    if (st.res !== p.res || st.colorBy !== p.colorBy || st.layers !== p.layers || st.hidden !== p.hidden || st.dark !== p.dark || st.sources !== p.sources || st.bundle !== p.bundle || st.session !== p.session) updateMap(st);
     if (st.hlPlace !== p.hlPlace || st.filter.place !== p.filter?.place) m.setFilter('place-hl', ['==', ['get', 'i'], st.hlPlace ?? st.filter.place ?? -1]);
     if (st.basemap !== p.basemap) setBasemap(st);
     if (!M.fitted) { M.fitted = true; fitHome(false); }
@@ -185,6 +192,22 @@ function bindMapEvents(m) {
     m.on('mousemove', id, trailHover);
     m.on('mouseleave', id, () => { if (hoverPlace == null) hideTip(); });
   }
+  // bundled view: a bundle is a place pair, drawn schematically
+  m.on('mousemove', 'bundles', e => {
+    if (hoverPlace != null) return;
+    const f = e.features[0]; if (!f) return;
+    const st = getState(), p = f.properties, lbl = i => i >= 0 ? st.ctx.places[i]?.label : null;
+    const a = lbl(p.a), b = lbl(p.b), src = srcById(st, p.src);
+    const n = `${p.n.toLocaleString('en-GB')} trip${p.n === 1 ? '' : 's'}`;
+    showTip(e.originalEvent, <>
+      <b>{p.loop ? `Round trip${a ? ' from ' + a : ''}` : `${n} between ${a || 'an unnamed spot'} and ${b || 'an unnamed spot'}`}</b><br />
+      <span className="m">{p.loop ? 'Not bundled: the route as recorded' : p.bundled ? 'Bundled: a schematic line, not the route taken' : 'Not bundled (a rare pair): one recorded route'}</span>
+      {st.colorBy === 'mode' && <><br />{MODES[MODE_IDX[p.mode]].label}</>}
+      {st.colorBy === 'device' && st.mode === 'separate' && src && <><br />{src.name}</>}
+    </>);
+    m.getCanvas().style.cursor = 'default';
+  });
+  m.on('mouseleave', 'bundles', () => { if (hoverPlace == null) hideTip(); });
   m.on('moveend', () => {
     if (!M.quiet && m.getContainer().clientWidth > 0) M.bounds = m.getBounds();
     moveListeners.forEach(f => f());
@@ -281,7 +304,7 @@ function updateMap(st) {
   const ctx = st.ctx, res = st.res;
   applyMapFilters(st);
   const ce = colorExpr(st);
-  for (const id of ['trails', 'trails-fl', 'trails-jump']) map.setPaintProperty(id, 'line-color', ce);
+  for (const id of ['trails', 'trails-fl', 'trails-jump', 'bundles']) map.setPaintProperty(id, 'line-color', ce);
   // places
   const pf = res.places.map(o => {
     const p = ctx.places[o.i];
@@ -304,10 +327,34 @@ function updateMap(st) {
   // visibility
   const vis = (id, on) => map.getLayer(id) && map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
   const L = st.layers;
-  vis('trails', L.trails); vis('trails-fl', L.trails); vis('trails-jump', L.trails);
+  // bundled view: bundles replace the trips (not flights); playback shows single trips again
+  const bundled = st.bundle && !st.session;
+  vis('trails', L.trails && !bundled); vis('trails-fl', L.trails); vis('trails-jump', L.trails && !bundled);
+  vis('bundles', L.trails && bundled);
+  if (L.trails && bundled) scheduleBundles(st);
   vis('heat', L.heat); vis('places', L.places); vis('place-hl', L.places);
   vis('flows', L.flows); vis('ellipse-fill', L.ellipse); vis('ellipse-line', L.ellipse);
   map.setFilter('place-hl', ['==', ['get', 'i'], st.hlPlace ?? st.filter.place ?? -1]);
+}
+/* Bundling takes up to about a second on years of data, so it runs once the filtered trips (res)
+   settle, behind the busy overlay, and only when the trips or their colours changed. */
+function scheduleBundles(st) {
+  const key = [st.res, st.colorBy];
+  if (M.bundleKey && M.bundleKey.every((v, i) => v === key[i])) return;
+  clearTimeout(M.bundleTimer);
+  M.bundleTimer = setTimeout(async () => {
+    const s2 = getState();
+    if (!ready || !s2.bundle || s2.session || s2.res !== key[0] || s2.colorBy !== key[1]) return;
+    setState({ busy: { step: 'Bundling trips', sub: `${s2.res.T.length.toLocaleString('en-GB')} trips` } });
+    await sleep(40);
+    try {
+      const r = bundleTrips(s2, s2.res.T);
+      if (!ready) return;
+      map.getSource('bundles').setData({ type: 'FeatureCollection', features: r.features });
+      M.bundleKey = key;
+      setState({ bundleInfo: { pairs: r.nPairs, bundled: r.nBundled, loops: r.nLoops } });
+    } finally { setState({ busy: null }); }
+  }, 300);
 }
 function restyleMap(st) {
   map.setPaintProperty('bg', 'background-color', waterColor());

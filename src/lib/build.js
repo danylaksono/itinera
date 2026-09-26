@@ -1,5 +1,5 @@
 /* Raw source -> finished source: records, stays, trips with local fields. */
-import { MIN, HOUR, RAD, hav, bisect, browserOff, localFields } from './util.js';
+import { MIN, HOUR, DAY, RAD, hav, bisect, browserOff, localFields } from './util.js';
 import { newRaw } from './parse.js';
 
 function thinPath(path, minD = 25, maxN = 400) {
@@ -107,8 +107,35 @@ function inferMode(path, dist, dur) {
   return 'road';
 }
 
-/* raw -> finished source. merge=true dedupes records from several devices. */
-export function finalize(raw, id, { merge = false } = {}) {
+/* Records with no UTC offset (Records.json, GPX times in Z) take the offset of the nearest record,
+   within 36 h, from any source that has one (the phone's Timeline.json), so a device that was
+   carried together with it gets the same local time. finalize() then tries 30 days (a gap in the
+   phone's records), and only then the browser's time zone. Built on first use: most exports have offsets everywhere. */
+export function offsetGuide(raws) {
+  let T = null, O = null;
+  const build = () => {
+    const pairs = [];
+    for (const r of raws) {
+      const P = r.P;
+      for (let i = 0; i < P.t.length; i++) if (P.off[i] != null) pairs.push([P.t[i], P.off[i]]);
+      for (const v of r.visits) if (v.off != null) pairs.push([v.t0, v.off]);
+      for (const t of r.trips) if (t.off != null) pairs.push([t.t0, t.off]);
+    }
+    pairs.sort((a, b) => a[0] - b[0]);
+    T = Float64Array.from(pairs, p => p[0]); O = Int16Array.from(pairs, p => p[1]);
+  };
+  return (t, maxGap = 36 * HOUR) => {
+    if (!T) build();
+    const i = bisect(T, t);
+    let best = null, bd = maxGap;
+    if (i < T.length && T[i] - t <= bd) { bd = T[i] - t; best = O[i]; }
+    if (i > 0 && t - T[i - 1] < bd) best = O[i - 1];
+    return best;
+  };
+}
+
+/* raw -> finished source. merge=true dedupes records from several devices. guide = offsetGuide(). */
+export function finalize(raw, id, { merge = false, guide = null } = {}) {
   const P = raw.P;
   const tt = P.t.slice(), la = P.lat.slice(), lo = P.lon.slice(), ac = P.acc.slice(), of = P.off.slice();
   const push = (t, a, b, off) => { if (!isFinite(a) || !isFinite(b)) return; tt.push(t); la.push(a); lo.push(b); ac.push(-1); of.push(off ?? null); };
@@ -123,7 +150,7 @@ export function finalize(raw, id, { merge = false } = {}) {
   idx.sort((a, b) => tt[a] - tt[b]);
   const gap = merge ? 20000 : 999;
   const T = [], LA = [], LO = [], OF = [], AC = [];
-  let lastKnownOff = null;
+  let lastKnownOff = null, offNearby = 0, offBrowser = 0;
   for (let k = 0; k < N; k++) {
     const i = idx[k], t = tt[i];
     const n = T.length;
@@ -132,11 +159,17 @@ export function finalize(raw, id, { merge = false } = {}) {
       continue;
     }
     let off = of[i];
-    if (off == null) off = lastKnownOff != null ? lastKnownOff : browserOff(t); else lastKnownOff = off;
+    if (off != null) lastKnownOff = off;
+    else {
+      const g = guide ? guide(t) ?? guide(t, 30 * DAY) : null;
+      if (g != null) { off = g; offNearby++; }
+      else if (lastKnownOff != null) { off = lastKnownOff; offNearby++; }
+      else { off = browserOff(t); offBrowser++; }
+    }
     T.push(t); LA.push(la[i]); LO.push(lo[i]); OF.push(off); AC.push(ac[i]);
   }
   const src = {
-    id, name: raw.name, kind: raw.kind, files: raw.files, raw,
+    id, name: raw.name, kind: raw.kind, files: raw.files, raw, offNearby, offBrowser,
     T: Float64Array.from(T), LA: Float64Array.from(LA), LO: Float64Array.from(LO), OF: Int16Array.from(OF),
     visits: [], trips: []
   };

@@ -5,8 +5,7 @@ import { serve, launch, attachLogs, loadSample, OUT } from './common.mjs';
 const scheme = process.argv[2] || 'light';
 const site = await serve();
 const b = await launch();
-// the sample lives in Lisbon: Records.json has no UTC offsets and falls back to the browser time zone (AGENTS.md, section 9)
-const pg = await b.newPage({ viewport: { width: 1440, height: 900 }, colorScheme: scheme, timezoneId: 'Europe/Lisbon' });
+const pg = await b.newPage({ viewport: { width: 1440, height: 900 }, colorScheme: scheme });
 const logs = [];
 attachLogs(pg, logs);
 const shot = name => pg.screenshot({ path: path.join(OUT, `${name}_${scheme}.png`) });

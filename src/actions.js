@@ -2,7 +2,7 @@
 import { HOUR, sleep } from './lib/util.js';
 import { INKS_L } from './lib/colors.js';
 import { loadFiles } from './lib/parse.js';
-import { finalize, combinedRaw, joinRaws } from './lib/build.js';
+import { finalize, combinedRaw, joinRaws, offsetGuide } from './lib/build.js';
 import { loadGeo } from './lib/geo.js';
 import { makeSample } from './lib/sample.js';
 import { buildContext, compute, markDuplicates, togetherness, srcById, defaultLabel, saveName } from './lib/analytics.js';
@@ -88,10 +88,19 @@ export async function rebuildAll() {
 async function ingest(raws) {
   const first = !getState().sources.length;
   const sources = [...getState().sources];
+  // UTC offsets for records without one come from any source that has them (see offsetGuide)
+  const guide = offsetGuide([...sources.map(s => s.raw), ...raws]);
+  // sources loaded earlier that fell back to the browser time zone may now have offsets nearby
+  for (let k = 0; k < sources.length; k++) {
+    const o = sources[k]; if (!o.offBrowser) continue;
+    const s = finalize(o.raw, o.id, { guide });
+    s.name = o.name; s.colorIdx = o.colorIdx;
+    sources[k] = s;
+  }
   for (const r of raws) {
     busyStep(`Building ${r.name}`, `${(r.P.t.length + r.visits.length + r.trips.length).toLocaleString('en-GB')} records, stays and trips`);
     await sleep(15);
-    const s = finalize(r, nextSrcId++);
+    const s = finalize(r, nextSrcId++, { guide });
     if (!s.T.length && !s.visits.length) continue;
     const used = new Set(sources.map(o => o.colorIdx));
     let k = 0; while (used.has(k) && k < INKS_L.length) k++;
@@ -163,7 +172,8 @@ export async function toggleHidden(id) {
 }
 export async function joinSources(s, o) {
   await busy(`Joining ${s.name} and ${o.name}`, async () => {
-    const joined = finalize(joinRaws(s.raw, o.raw), s.id);
+    const joined = finalize(joinRaws(s.raw, o.raw), s.id, { guide: offsetGuide(getState().sources.map(x => x.raw)) });
+    joined.name = s.name;
     joined.colorIdx = s.colorIdx;
     const st = getState(), hidden = new Set(st.hidden);
     hidden.delete(o.id);

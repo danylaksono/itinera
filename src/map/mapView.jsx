@@ -131,7 +131,16 @@ export function createMap(container) {
     if (st.layers.streets !== p.layers?.streets) setStreets(st, st.layers.streets);
     if (!M.fitted) { M.fitted = true; fitHome(false); }
   }
+  /* MapLibre follows window resizes only. The panels around the map can change size on their own
+     (a late web-font load changes the heights of the bars), which would leave a stale canvas. */
+  let rzRaf = 0;
+  const ro = new ResizeObserver(() => {
+    cancelAnimationFrame(rzRaf);
+    rzRaf = requestAnimationFrame(() => { if (map === m && container.clientWidth && container.clientHeight) m.resize(); });
+  });
+  ro.observe(container);
   return () => {
+    ro.disconnect(); cancelAnimationFrame(rzRaf);
     unsub?.(); unclock?.();
     clearTimeout(M.streetsTimer);
     ready = false; map = null;

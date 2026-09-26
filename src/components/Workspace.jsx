@@ -53,7 +53,13 @@ function SourceChip({ s, sources, off }) {
   const d0 = Math.floor((s.t0 + o0 * MIN) / DAY), d1 = Math.floor((s.t1 + o0 * MIN) / DAY);
   const others = sources.filter(o => o !== s);
   const n = v => v.toLocaleString('en-GB');
-  const meta = `${fmtDay(d0)} to ${fmtDay(d1)}, ${n(s.T.length)} records, ${n(s.visits.length)} stays, ${n(s.trips.length)} trips${s.derivedVisits ? '. Stays and trips were found from the raw records.' : ''}${s.gapTrips ? `. ${n(s.gapTrips)} segments of over 2 h at under 1 km/h are treated as gaps, not trips.` : ''}`;
+  const meta = [
+    `${fmtDay(d0)} to ${fmtDay(d1)}, ${n(s.T.length)} records, ${n(s.visits.length)} stays, ${n(s.trips.length)} trips`,
+    s.derivedVisits && 'Stays and trips were found from the raw records',
+    s.gapTrips && `${n(s.gapTrips)} segments of over 2 h at under 1 km/h are treated as gaps, not trips`,
+    s.offNearby && `${n(s.offNearby)} records have no UTC offset in the file: their local time is estimated from the nearest records that have one`,
+    s.offBrowser && `${n(s.offBrowser)} records have no UTC offset and no records with one within 30 days: their local time uses this browser's time zone`
+  ].filter(Boolean).join('. ') + '.';
   const commit = e => { const v = e.currentTarget.textContent.trim(); if (v && v !== s.name) renameSource(s, v); else e.currentTarget.textContent = s.name; };
   return (
     <div className={'src' + (off ? ' off' : '')} data-id={s.id} title={s.files.slice(0, 6).join(', ') + (s.files.length > 6 ? '…' : '')}>

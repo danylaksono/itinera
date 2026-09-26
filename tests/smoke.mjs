@@ -15,11 +15,19 @@ const r = await pg.evaluate(() => {
     sources: s.sources.map(x => ({ name: x.name, records: x.T.length, stays: x.visits.length, trips: x.trips.length, derived: x.derivedVisits })),
     places: ctx.places.length, home: ctx.places[ctx.home]?.label, work: ctx.places[ctx.work]?.label,
     kpi: s.res.kpi, kpiText: [...document.querySelectorAll('.kpi .n')].map(e => e.textContent),
-    together: document.querySelector('#together').textContent
+    together: document.querySelector('#together').textContent,
+    // Records.json and GPX have no UTC offsets: they must borrow Lisbon's (0 or +60 min) from the phone, whatever the browser's time zone
+    offsets: s.sources.filter(x => x.kind !== 'android').map(x => ({ name: x.name, nearby: x.offNearby, browser: x.offBrowser, lisbon: x.OF.every(o => o === 0 || o === 60) }))
   };
 });
-// the cube floor must be the map view from before the switch, not the hidden map's fallback canvas
-const before = await pg.evaluate('window.__itinera.map.getBounds().toArray().flat()');
+// the cube floor must be the map view from before the switch, not the hidden map's fallback canvas.
+// First wait until the map has settled (a late web-font load can resize the panels and nudge it).
+let before = null;
+for (let k = 0; k < 20; k++) {
+  const b1 = await pg.evaluate('window.__itinera.map.getBounds().toArray().flat()');
+  if (before && b1.every((v, i) => Math.abs(v - before[i]) < 1e-9)) break;
+  before = b1; await pg.waitForTimeout(500);
+}
 await pg.click('#viewSeg button[data-v=cube]'); await pg.waitForTimeout(1500);
 const after = await pg.evaluate('window.__itinera.viewBounds()');
 r.cubeFloorOk = before.every((v, i) => Math.abs(v - after[i]) < 1e-6);
@@ -45,7 +53,7 @@ await pg.mouse.up(); await pg.waitForTimeout(800);
 r.brushFilter = await pg.evaluate('window.__itinera.store.filter.t0 != null && !!document.querySelector(".chip")');
 await pg.keyboard.press('Escape'); await pg.waitForTimeout(500);
 // the place timetable: Home and Work rows, trips drawn, and a real drag over the hours sets the hours filter only
-await pg.click('#viewSeg button[data-v=marey]'); await pg.waitForTimeout(1500);
+await pg.click('#viewSeg button[data-v=marey]'); await waitFor(pg, 'document.querySelectorAll("#marey .mrow").length > 3', 30000);
 r.marey = await pg.evaluate(() => {
   const rows = [...document.querySelectorAll('#marey .mrow')].map(e => e.dataset.k);
   const d = window.__itinera.mareyData('days', 17);
@@ -82,7 +90,7 @@ console.log('request to another site blocked:', blocked);
 const ok = !errs.length && r.home === 'Home' && r.work === 'Work' && r.kpi.countries === 2 && r.places === 30
   && r.sources.length === 3 && r.cubeFloorOk && r.cubeDrawn && r.mapViewKept && r.landDrawn && r.trailsRendered && r.modeFilter && r.escapeClears && r.brushFilter && r.zipOk
   && r.marey.home && r.marey.work && r.marey.trips > 1000 && r.marey.runs > 0 && r.mareyBrushOk && r.mareyPlace.place && r.mareyPlace.rows > 5 && blocked
-  && r.together.includes('98%')
+  && r.together.includes('98%') && r.offsets.length === 2 && r.offsets.every(o => o.lisbon && !o.browser && o.nearby > 0)
   // one person: phone trips (9,328 km) + watch runs (553 km); the work phone's copies are not added
   && Math.abs(r.kpi.dist / 1000 - 9881) < 100 && r.kpiText.slice(0, 3).every(t => t !== '0');
 await b.close(); site.close();

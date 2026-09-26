@@ -136,6 +136,11 @@ files -> loadFiles() -> detectAndParse() -> raw sources  (points P{t,lat,lon,acc
 - `T, LA, LO` are `Float64Array`, and `OF` is `Int16Array`: the UTC offset in minutes for each
   record. All "local" values (hour, day, weekday) use the offset of the record, not the
   browser time zone. This is necessary for trips that cross time zones (Barcelona in the sample).
+  Records with no offset in the file (`Records.json`, GPX times in `Z`) take one from
+  `offsetGuide()`: the nearest record with an offset from any loaded source, within 36 h and then
+  within 30 days. Only then is the browser's time zone used. `src.offNearby` and `src.offBrowser`
+  count the two cases, and the source's tooltip reports them. Sources that used the browser zone
+  are rebuilt when a later file brings offsets. The smoke test checks this on any machine.
 - A visit (stay) has `{t0,t1,lat,lon,pid,name,type,off,src,dur,place, day,hod,h,dow,mon,wk}`.
 - A trip has `{t0,t1,lat0,lon0,lat1,lon1,dist,dur,mode,rawMode,inferred,path:[[t,lat,lon]...],off,src,from,to, day,hod,h,dow,mon,wk}`.
   `mode` is one of `walk, cycle, road, transit, flight, other` (see `modeGroup()` and `MODES`).
@@ -201,6 +206,10 @@ filters are MapLibre expressions made by `baseFilter()`. `sync()` compares the n
 the last one: new `ctx` → `setMapData()`; new `res`, colours, layers or visibility →
 `updateMap()`; theme → `restyleMap()`. The optional CARTO street tiles fail without internet.
 `streetsFailed()` then shows a toast. That is expected.
+
+MapLibre follows window resizes only, so `createMap()` also puts a `ResizeObserver` on the map
+container. Without it, a panel that changes size after load (a late web-font load changes the
+bar heights) left a stale canvas, and the smoke test's `mapViewKept` failed about half the time.
 
 `M.bounds` is the map view the user chose. A hidden map (cube view) reports a 400×300 fallback
 canvas, so the cube floor and view switches use `viewBounds()` and `restoreView()`, never a bare
@@ -374,15 +383,13 @@ Semantic Location History), export, the layer toggles, mobile layout.
 16. The workspace chunk and `actions.js` are about 510 kB and 860 kB before gzip (MapLibre,
     three.js, Turf). The cube could be split further with a dynamic `import()` of `cube.jsx`.
 17. **Sports logs as a second device** (a watch or Strava GPX next to a phone timeline). This is in
-    scope, and the sample models it ("Running watch"). Four small fixes make it correct:
+    scope, and the sample models it ("Running watch"). Three small fixes remain (the time-zone one
+    is done: see `offsetGuide()`):
     - Group the GPX files of one import into one source. Now each file becomes its own device
       (`parseGPX()`), so a bulk export of 600 activities shows 600 devices.
     - Map Strava's type names in `modeGroup()`: "Ride", "VirtualRide" and "EBikeRide" fall
       through to `other` (and so do "Swim", "Ski" and "Row"). Old exports use number codes
       (1 = ride, 9 = run).
-    - GPX times in UTC (`Z`) have no offset, so `finalize()` uses the browser's time zone. A run
-      abroad then lands in the wrong local hour. Borrow the offset from an overlapping source
-      that has one. The sample's `runs.gpx` uses `Z` but stays in Lisbon, so the tests miss this.
     - `markDuplicates()` ranks devices by days covered, so a carried phone outranks the watch and
       the watch run is marked `dup`. Prefer the denser track where they overlap. Combined mode
       has the same issue: its 20 s merge can keep the phone point, because GPX points have no
@@ -394,13 +401,10 @@ Semantic Location History), export, the layer toggles, mobile layout.
     café stops into places. `inferMode()` classes a run over about 9.4 km/h as cycling and a
     road ride over about 21.6 km/h as road. `thinPath()` keeps at most 400 vertices per trip.
     Revisit these only if a sports mode is taken on.
-18. **Sources with no UTC offsets use the browser's time zone.** `Records.json` (and GPX in `Z`)
-    has no offsets, so `finalize()` falls back to `browserOff()`. On a machine that is not in the
-    data's time zone, that device's local hours shift. On a UTC+7 machine the sample's Work phone
-    commutes at about 00:00 in the rhythm grid and the timetable. `tests/shots.mjs` pins
-    `timezoneId: 'Europe/Lisbon'` for this reason; the smoke test does not depend on it. Fix: borrow
-    the offset from an overlapping source that has one (the phone's Timeline.json), then fall back
-    to the browser. This is the same fix as the GPX part of item 17.
+18. **A lone file with no offsets** (only `Records.json`, or only a GPX) still uses the browser's
+    time zone, because there is no other source to borrow from. Real `Records.json` files often
+    come with the Semantic Location History, which has offsets. A time-zone lookup from the
+    coordinates would need a bundled time-zone map (several MB), so it is not planned.
 19. **Place timetable at ten years.** Stacked days work, but many rows saturate and the trips
     become a haze. Brushing a period on the timeline helps. Consider an alpha from the density
     (for example, render the counts into a buffer and map them through a ramp), or a default that
@@ -412,6 +416,13 @@ Semantic Location History), export, the layer toggles, mobile layout.
 GitHub Pages (`.github/workflows/pages.yml`) or Netlify (`netlify.toml`). Both run
 `npm run build` (after `npm ci`) and serve `dist/`. Do not publish Claude artifacts to test.
 Test locally with `npm test` and `npm run shots`.
+
+GitHub Pages must use **Settings → Pages → Source: GitHub Actions**. With "Deploy from a branch",
+GitHub's own Jekyll build also runs on every push and publishes the raw repository. Its
+`index.html` loads `/src/main.jsx`, so the site is blank and has no CSP, and it finishes after the
+workflow, so it wins. In Sep 2026 the site was in this state. To check: `gh api
+repos/danylaksono/itinera/pages` must show `"build_type":"workflow"`, and the live page must load
+`assets/index-*.js`, not `/src/main.jsx`.
 
 Before you push, check:
 

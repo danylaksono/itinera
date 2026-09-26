@@ -32,6 +32,11 @@ await pg.click('#viewSeg button[data-v=cube]'); await pg.waitForTimeout(1500);
 const after = await pg.evaluate('window.__itinera.viewBounds()');
 r.cubeFloorOk = before.every((v, i) => Math.abs(v - after[i]) < 1e-6);
 r.cubeDrawn = await pg.evaluate('!!document.querySelector("#cube canvas") && document.querySelector("#cubeCap").textContent.includes("shown")');
+// the floor around home: every period in one local frame, with trips drawn
+await pg.click('#floorSeg button[data-v=home]');
+await waitFor(pg, 'document.querySelector("#cubeCap").textContent.includes("around the home")', 30000);
+r.cubeHome = await pg.evaluate('/\\((\\d[\\d,]*) shown/.exec(document.querySelector("#cubeCap").textContent)?.[1]');
+await pg.click('#floorSeg button[data-v=map]'); await pg.waitForTimeout(1500);
 await pg.click('#viewSeg button[data-v=map]'); await pg.waitForTimeout(1000);
 const back = await pg.evaluate('window.__itinera.map.getBounds().toArray().flat()');
 r.mapViewKept = before.every((v, i) => Math.abs(v - back[i]) < 1e-3);
@@ -88,7 +93,7 @@ for (const l of logs) console.log(l);
 const blocked = await pg.evaluate("fetch('https://example.com/').then(() => false, () => true)");
 console.log('request to another site blocked:', blocked);
 const ok = !errs.length && r.home === 'Home' && r.work === 'Work' && r.kpi.countries === 2 && r.places === 30
-  && r.sources.length === 3 && r.cubeFloorOk && r.cubeDrawn && r.mapViewKept && r.landDrawn && r.trailsRendered && r.modeFilter && r.escapeClears && r.brushFilter && r.zipOk
+  && r.sources.length === 3 && r.cubeFloorOk && r.cubeDrawn && +String(r.cubeHome).replace(',', '') > 1000 && r.mapViewKept && r.landDrawn && r.trailsRendered && r.modeFilter && r.escapeClears && r.brushFilter && r.zipOk
   && r.marey.home && r.marey.work && r.marey.trips > 1000 && r.marey.runs > 0 && r.mareyBrushOk && r.mareyPlace.place && r.mareyPlace.rows > 5 && blocked
   && r.together.includes('98%') && r.offsets.length === 2 && r.offsets.every(o => o.lisbon && !o.browser && o.nearby > 0)
   // one person: phone trips (9,328 km) + watch runs (553 km); the work phone's copies are not added

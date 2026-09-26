@@ -1,16 +1,33 @@
-/* Space-time cube (three.js). Floor = current map view (web mercator, longest side 100 units),
-   height = selected time range (72 units). Renders on demand only.
+/* Space-time cube (three.js). Floor = current map view (web mercator, longest side 100 units), or
+   (state.cubeFloor = 'home') the area around the home of each time, in km. Height =
+   selected time range (72 units). Renders on demand only.
    createCube(el, lblBox, setCaption) returns { build, schedule, setClock, show, destroy }. */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { color as d3color, scaleUtc } from 'd3';
-import { MIN, DAY, RAD, clamp, fmtDay, fmtDur, fmtLocal } from '../lib/util.js';
+import { MIN, DAY, RAD, hav, clamp, fmtDay, fmtDur, fmtKm, fmtLocal } from '../lib/util.js';
 import { cssv, modeColor, hourColor, trackColor } from '../lib/colors.js';
 import { WORLD } from '../lib/geo.js';
-import { activeSources, visibleSources, srcById, playRange, offNear, headAt } from '../lib/analytics.js';
+import { activeSources, visibleSources, srcById, playRange, offNear, headAt, homeAt } from '../lib/analytics.js';
 import { getState, showing } from '../store.js';
 import { getMap, mapReady, viewBounds, boundsOf } from '../map/mapView.jsx';
 import { showTip, hideTip } from '../tip.jsx';
+
+/* Around-home floor radius (km): the 75th percentile of the distances of stays away from home (from
+   the home of their time), rounded up to 1, 2, 5, 10, 20 or 50 km. */
+function homeRadius(st, a, b) {
+  const d = [];
+  for (const v of st.res.V) {
+    if (v.t1 < a || v.t0 > b) continue;
+    const pi = homeAt(v.t0, st.ctx); if (pi < 0 || v.place === pi) continue;
+    const hp = st.ctx.places[pi];
+    d.push(hav(hp.lat, hp.lon, v.lat, v.lon) / 1000);
+  }
+  d.sort((x, y) => x - y);
+  const p = d.length ? d[Math.floor(d.length * 0.75)] : 5;
+  const nice = [1, 2, 5, 10, 20, 50];
+  return nice.find(n => n >= p) ?? 50;
+}
 
 export function createCube(el, lblBox, setCaption) {
   let renderer;
@@ -29,7 +46,7 @@ export function createCube(el, lblBox, setCaption) {
   controls.addEventListener('change', render);
   const ray = new THREE.Raycaster();
   let root = null, built = false, timer = null, rafPending = false, clockT = null, dead = false;
-  let geo = null; // { toX, toZ, toY, X, Z, H, a, b, stays, inst }
+  let geo = null; // { frame, toY, X, Z, H, a, b, stays, inst }
   let clockGrp = null, heads = [];
   const labels = [];
   const visible = () => showing(getState(), 'cube');
@@ -99,15 +116,38 @@ export function createCube(el, lblBox, setCaption) {
     if (root) { scene.remove(root); disposeTree(root); }
     labels.length = 0; lblBox.replaceChildren();
     root = new THREE.Group(); scene.add(root);
-    const [w, s, e, n] = extent(st);
-    const x0 = mx(w), x1 = mx(e), y0 = my(n), y1 = my(s);
-    const k = 100 / Math.max(x1 - x0, y1 - y0);
-    const X = (x1 - x0) * k, Z = (y1 - y0) * k, H = 72;
     const [a, b] = playRange(st);
-    const toX = lon => (mx(lon) - x0) * k - X / 2, toZ = lat => (my(lat) - y0) * k - Z / 2;
-    const toY = t => (t - a) / Math.max(1, b - a) * H;
-    const inside = (lat, lon) => lon >= w && lon <= e && lat >= s && lat <= n;
-    geo = { toX, toZ, toY, X, Z, H, a, b };
+    const H = 72, toY = t => (t - a) / Math.max(1, b - a) * H;
+    /* frame(t) gives the floor projection (lat, lon) => [x, z] for time t, or null.
+       'map': the map view (web mercator), the same for every t.
+       'home': km east and north of the home of time t, so years at different homes share one
+       frame; t with no known home gives null (left out). */
+    let X, Z, frame, R = 0, wide = false;
+    if (st.cubeFloor === 'home') {
+      R = homeRadius(st, a, b);
+      X = Z = 100;
+      const kk = 50 / R, cache = new Map();
+      frame = t => {
+        const pi = homeAt(t, st.ctx); if (pi < 0) return null;
+        let f = cache.get(pi);
+        if (!f) {
+          const hp = st.ctx.places[pi], cl = Math.cos(hp.lat * RAD) * 111.32 * kk;
+          f = (lat, lon) => [(lon - hp.lon) * cl, -(lat - hp.lat) * 110.57 * kk];
+          cache.set(pi, f);
+        }
+        return f;
+      };
+    } else {
+      const [w, s, e, n] = extent(st);
+      wide = (e - w) * Math.cos((s + n) / 2 * RAD) > 9; // wider than about 1,000 km
+      const x0 = mx(w), x1 = mx(e), y0 = my(n), y1 = my(s);
+      const k = 100 / Math.max(x1 - x0, y1 - y0);
+      X = (x1 - x0) * k; Z = (y1 - y0) * k;
+      const f = (lat, lon) => [(mx(lon) - x0) * k - X / 2, (my(lat) - y0) * k - Z / 2];
+      frame = () => f;
+    }
+    const inBox = q => q && Math.abs(q[0]) <= X / 2 + 1e-6 && Math.abs(q[1]) <= Z / 2 + 1e-6;
+    geo = { frame, toY, X, Z, H, a, b };
     const ink = cssv('--ink'), rule = cssv('--rule');
     renderer.localClippingEnabled = true;
 
@@ -116,9 +156,23 @@ export function createCube(el, lblBox, setCaption) {
     floor.rotation.x = -Math.PI / 2; floor.position.y = -0.05; root.add(floor);
     const box = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(X, H, Z)), new THREE.LineBasicMaterial({ color: col(rule) }));
     box.position.y = H / 2; root.add(box);
-    if (WORLD) {
+    if (st.cubeFloor === 'home') {
+      // distance rings around home (the floor is not a map here)
       const pos = [];
-      const addLine = co => { for (let i = 1; i < co.length; i++) { const p = co[i - 1], q = co[i]; if (!inside(p[1], p[0]) && !inside(q[1], q[0])) continue; pos.push(toX(p[0]), 0.02, toZ(p[1]), toX(q[0]), 0.02, toZ(q[1])); } };
+      addLabel(new THREE.Vector3(0, 0, 0), 'Home', 'place'); // first, so it wins over the ring labels
+      for (const rk of [R / 5, R / 2, R]) {
+        const rr = rk * 50 / R;
+        for (let i = 0; i < 96; i++) {
+          const a1 = i / 96 * 2 * Math.PI, a2 = (i + 1) / 96 * 2 * Math.PI;
+          pos.push(Math.cos(a1) * rr, 0.02, Math.sin(a1) * rr, Math.cos(a2) * rr, 0.02, Math.sin(a2) * rr);
+        }
+        addLabel(new THREE.Vector3(rr * Math.SQRT1_2, 0, rr * Math.SQRT1_2), `${fmtKm(rk * 1000)} km`, 'ring');
+      }
+      const bg = new THREE.BufferGeometry(); bg.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      root.add(new THREE.LineSegments(bg, new THREE.LineBasicMaterial({ color: col(cssv('--border-map')) })));
+    } else if (WORLD) {
+      const pos = [], fm = frame(a);
+      const addLine = co => { for (let i = 1; i < co.length; i++) { const p = fm(co[i - 1][1], co[i - 1][0]), q = fm(co[i][1], co[i][0]); if (!inBox(p) && !inBox(q)) continue; pos.push(p[0], 0.02, p[1], q[0], 0.02, q[1]); } };
       const g = WORLD.land.features ? WORLD.land.features : [WORLD.land];
       for (const f of g) { const gm = f.geometry; const polys = gm.type === 'Polygon' ? [gm.coordinates] : gm.coordinates; for (const p of polys) for (const r of p) addLine(r); }
       for (const l of WORLD.borders.coordinates) addLine(l);
@@ -140,16 +194,18 @@ export function createCube(el, lblBox, setCaption) {
     const MAXSEG = 350000;
     for (const t of trips) {
       const path = t.path; if (path.length < 2) continue;
+      const fm = frame(t.t0); if (!fm) continue; // a whole trip uses the home at its start
       let any = false;
       const c = col(colorOf(t));
       for (let i = 1; i < path.length; i++) {
         const p = path[i - 1], q = path[i];
-        if (!inside(p[1], p[2]) && !inside(q[1], q[2])) continue;
         if (q[0] < a || p[0] > b) continue;
+        const pp = fm(p[1], p[2]), qq = fm(q[1], q[2]);
+        if (!inBox(pp) && !inBox(qq)) continue;
         any = true;
-        P.push(toX(p[2]), toY(p[0]), toZ(p[1]), toX(q[2]), toY(q[0]), toZ(q[1]));
+        P.push(pp[0], toY(p[0]), pp[1], qq[0], toY(q[0]), qq[1]);
         C.push(c.r, c.g, c.b, c.r, c.g, c.b);
-        SH.push(toX(p[2]), 0.04, toZ(p[1]), toX(q[2]), 0.04, toZ(q[1]));
+        SH.push(pp[0], 0.04, pp[1], qq[0], 0.04, qq[1]);
         if (++segs > MAXSEG) break;
       }
       if (any) nTrips++;
@@ -166,7 +222,8 @@ export function createCube(el, lblBox, setCaption) {
       root.add(new THREE.LineSegments(g2, new THREE.LineBasicMaterial({ color: col(ink), transparent: true, opacity: 0.16, clippingPlanes: clip })));
     }
     // ---- stays as vertical cylinders (instanced)
-    let stays = st.res.V.filter(v => v.t1 >= a && v.t0 <= b && inside(v.lat, v.lon));
+    const spot = v => { const fm = frame(v.t0); return fm && fm(v.lat, v.lon); };
+    let stays = st.res.V.filter(v => v.t1 >= a && v.t0 <= b && inBox(spot(v)));
     if (stays.length > 8000) stays = stays.slice().sort((p, q) => q.dur - p.dur).slice(0, 8000);
     geo.stays = stays;
     if (stays.length) {
@@ -180,7 +237,8 @@ export function createCube(el, lblBox, setCaption) {
         const ya = toY(Math.max(v.t0, a)), yb = toY(Math.min(v.t1, b));
         const hh = Math.max(0.12, yb - ya);
         const rr = homes.has(v.place) ? r * 1.25 : r;
-        ps.set(toX(v.lon), ya + hh / 2, toZ(v.lat)); sc.set(rr, hh, rr);
+        const q2 = spot(v);
+        ps.set(q2[0], ya + hh / 2, q2[1]); sc.set(rr, hh, rr);
         m4.compose(ps, q, sc); inst.setMatrixAt(i, m4);
         const c = st.colorBy === 'device' ? col(trackColor(st, srcById(st, v.src) || fallback)) : col(homes.has(v.place) ? ink : cssv('--ink-2'));
         inst.setColorAt(i, c);
@@ -189,8 +247,16 @@ export function createCube(el, lblBox, setCaption) {
       root.add(inst); geo.inst = inst;
     } else geo.inst = null;
     // ---- place labels on the floor (top places inside the view)
-    const inView = st.res.places.map(o => st.ctx.places[o.i]).filter(p => inside(p.lat, p.lon)).slice(0, 10); // overlapping ones are hidden in placeLabels
-    for (const p of inView) addLabel(new THREE.Vector3(toX(p.lon), 0, toZ(p.lat)), p.label, 'place');
+    // (around home: a place sits where it was from the home of its first visit; home itself is the centre)
+    let nl = 0;
+    for (const o of st.res.places) {
+      const p = st.ctx.places[o.i];
+      if (st.cubeFloor === 'home' && st.ctx.homeSet.has(o.i)) continue;
+      const fm = frame(p.first), q2 = fm && fm(p.lat, p.lon);
+      if (!inBox(q2)) continue;
+      addLabel(new THREE.Vector3(q2[0], 0, q2[1]), p.label, 'place'); // overlapping ones are hidden in placeLabels
+      if (++nl >= 10) break;
+    }
     // ---- time ticks on the back-left edge
     const off = offNear(st, a);
     const sc = scaleUtc().domain([a + off * MIN, b + off * MIN]).range([0, H]);
@@ -220,7 +286,7 @@ export function createCube(el, lblBox, setCaption) {
       return m;
     });
     const d0 = Math.floor((a + off * MIN) / DAY), d1 = Math.floor((b + offNear(st, b) * MIN) / DAY);
-    setCaption({ from: fmtDay(d0), to: fmtDay(d1), split: st.view === 'split', nTrips, faint: tripAlpha < 0.85 });
+    setCaption({ from: fmtDay(d0), to: fmtDay(d1), split: st.view === 'split', nTrips, faint: tripAlpha < 0.85, floor: st.cubeFloor, R, wide, homes: st.ctx.homes.length });
     fitCamera();
     built = true;
     placeClock();
@@ -228,7 +294,7 @@ export function createCube(el, lblBox, setCaption) {
   }
   function addLabel(v, text, kind) {
     const d = document.createElement('div');
-    d.className = 'cube-lbl' + (kind === 'place' ? ' is-place' : '');
+    d.className = 'cube-lbl' + (kind === 'place' ? ' is-place' : kind === 'ring' ? ' is-ring' : '');
     d.textContent = text;
     lblBox.appendChild(d);
     labels.push({ v, d, kind, w: 0 });
@@ -271,7 +337,9 @@ export function createCube(el, lblBox, setCaption) {
     for (const m of heads) {
       const hd = headAt(m.userData.src, c);
       if (!hd) { m.visible = false; m.userData.stem.visible = false; continue; }
-      const x = geo.toX(hd.lon), z = geo.toZ(hd.lat);
+      const q = geo.frame(c)?.(hd.lat, hd.lon);
+      if (!q) { m.visible = false; m.userData.stem.visible = false; continue; }
+      const [x, z] = q;
       const inBox = Math.abs(x) <= geo.X / 2 && Math.abs(z) <= geo.Z / 2;
       m.visible = inBox; m.position.set(x, y, z);
       m.material.opacity = hd.stale ? 0.4 : 1; m.material.transparent = hd.stale;

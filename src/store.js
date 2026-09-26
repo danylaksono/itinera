@@ -10,6 +10,7 @@ let state = {
   sources: [], merged: null, mode: 'separate', hidden: new Set(),
   colorBy: 'device', view: 'map', modeMetric: 'dist',
   second: 'cube',             // the view beside the map in split: 'cube' | 'marey' (the last one opened)
+  cubeFloor: 'map',           // space-time cube floor: 'map' (the map view) | 'home' (km around the home of each time)
   mareyLayout: 'days',        // place timetable: 'days' (stacked on 24 h) | 'calendar'
   layers: { trails: true, heat: true, places: true, flows: false, ellipse: false, streets: false },
   filter: NO_FILTER,

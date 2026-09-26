@@ -71,6 +71,7 @@ function MapHost() {
 function CubeHost() {
   const ref = useRef(null), lbl = useRef(null);
   const [cap, setCap] = useState(null);
+  const floor = useStore(s => s.cubeFloor);
   useEffect(() => {
     let cube = null, prev = getState();
     const show = () => {
@@ -84,17 +85,21 @@ function CubeHost() {
     const unsub = subscribe(() => {
       const st = getState(), p = prev; prev = st;
       if (st.view !== p.view || st.second !== p.second) { requestAnimationFrame(show); return; }
-      if (cube && (st.res !== p.res || st.ctx !== p.ctx || st.colorBy !== p.colorBy || st.dark !== p.dark || st.labels !== p.labels || st.sources !== p.sources)) cube.schedule();
+      if (cube && (st.res !== p.res || st.ctx !== p.ctx || st.colorBy !== p.colorBy || st.dark !== p.dark || st.labels !== p.labels || st.sources !== p.sources || st.cubeFloor !== p.cubeFloor)) cube.schedule();
     });
-    const unmove = onMapMove(() => cube?.schedule());
+    const unmove = onMapMove(() => { if (getState().cubeFloor === 'map') cube?.schedule(); });
     const unclock = onClock(t => cube?.setClock(t));
     return () => { unsub(); unmove(); unclock(); cube?.destroy(); };
   }, []);
   return (
     <div id="cube">
       <div className="cube-cap" id="cubeCap">
-        {cap?.error ? <><b>Space-time cube</b><br />{cap.error}</>
-          : cap && <><b>Space-time cube.</b> Time goes up, from {cap.from} at the floor to {cap.to} at the top. The floor is the {cap.split ? 'map view on the left' : 'last map view'}. Columns are stays, lines are trips ({cap.nTrips.toLocaleString('en-GB')} shown{cap.faint ? ', drawn faint over a long period so the stays show' : ''}). Drag to turn, scroll to zoom, double-click to reset.</>}
+        <p>{cap?.error ? <><b>Space-time cube</b><br />{cap.error}</>
+          : cap && <><b>Space-time cube.</b> Time goes up, from {cap.from} at the floor to {cap.to} at the top. {cap.floor === 'home'
+            ? <>The floor is not a map: it is {cap.R} km around the home of each time, with home at the centre, so years at different homes share one frame.{cap.homes ? ' Months with no known home are left out.' : ' No home is known, so nothing is shown.'}</>
+            : <>The floor is the {cap.split ? 'map view on the left' : 'last map view'}.{cap.wide ? ' At this scale local trips are tiny: try the floor around home.' : ''}</>}
+            {' '}Columns are stays, lines are trips ({cap.nTrips.toLocaleString('en-GB')} shown{cap.faint ? ', drawn faint over a long period so the stays show' : ''}). Drag to turn, scroll to zoom, double-click to reset.</>}</p>
+        <Seg id="floorSeg" label="Cube floor" value={floor} onChange={v => setState({ cubeFloor: v })} options={[['map', 'Map view'], ['home', 'Around home']]} />
       </div>
       <div className="cube-plot" ref={ref}>
         <div ref={lbl} style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}></div>

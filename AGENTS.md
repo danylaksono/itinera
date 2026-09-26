@@ -228,8 +228,14 @@ the calendar and rhythm grid, and the cube clock plane. Only the clock text re-r
 
 ### Space-time cube (`src/cube/cube.jsx`)
 
-The floor is the current map view (web mercator, longest side = 100 units). The height is
-the selected time range (72 units). Trips are `LineSegments` with vertex colours and a
+The floor (`state.cubeFloor`, the switch in the caption strip) is either the current map view
+(`'map'`: web mercator, longest side = 100 units) or `'home'`: km east and north of *the home of
+each time* (`homeAt()`), so years at different homes and continents share one local frame. Its
+radius is the 75th percentile of the distances of stays away from home, rounded to 1, 2, 5, 10, 20
+or 50 km, with rings at R/5, R/2 and R. That floor is not a map, and the caption says so. Months
+with no known home are left out. Everything goes through `frame(t)`, which gives the projection
+for time t (a whole trip uses the home at its start). The height is the selected time range
+(72 units). Trips are `LineSegments` with vertex colours and a
 ground shadow. Stays are an `InstancedMesh` of cylinders. Place names and time ticks are
 HTML labels projected each frame, in a box above the canvas. The time labels go on the vertical
 edge that is leftmost on screen, and a label that would overlap one already placed is hidden
@@ -366,8 +372,10 @@ Semantic Location History), export, the layer toggles, mobile layout.
    jump to a year (for example, from the timeline axis) could help with ten-year files.
 8. **Timeline axis.** Fixed: the svg may overflow into the panel's padding, and a tick label that
    would still not fit is hidden, not clipped ("2017" shows in full, a clipped "Ma" is hidden).
-9. **Cube at world scale.** With ten years and two continents, local trips collapse to dots.
-   Consider a default floor of the home area, or a log-time axis.
+9. **Cube at world scale.** Done (Sep 2026): the "Around home" floor (`state.cubeFloor = 'home'`)
+   puts each period in one local frame. In the map floor, the caption suggests it when the view is
+   wider than about 1,000 km. Possible next steps: an adaptive (log) radius, so both the routine
+   and day trips fit, and places labelled once per home period.
 10. **Progressive reveal in playback** looks as if nothing changes when the routes repeat.
     Consider a short "recent trips" highlight in addition to the tail.
 11. **Load time.** About 1 s of JS work for the sample. `makeSample()` takes about 0.7 s. For

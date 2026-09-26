@@ -121,7 +121,12 @@ function draw(el, TL, st, width) {
       .attr('fill', st.mode === 'combined' ? cssv('--ink-2') : inkOf(s)).attr('opacity', st.hidden.has(s.id) ? 0.25 : 0.9);
   });
   // --- axis
-  g.append('g').attr('class', 'axis').attr('transform', `translate(0,${H - 20})`).call(d3.axisBottom(x).ticks(Math.max(2, Math.floor(W / 90))).tickSizeOuter(0));
+  const ax = g.append('g').attr('class', 'axis').attr('transform', `translate(0,${H - 20})`).call(d3.axisBottom(x).ticks(Math.max(2, Math.floor(W / 90))).tickSizeOuter(0));
+  // labels may use the panel's padding (the svg overflows into it); one that still would not fit is hidden
+  ax.selectAll('.tick').each(function () {
+    const t = this.querySelector('text'), cx = +this.getAttribute('transform').match(/translate\(([-\d.]+)/)[1], hw = t.getComputedTextLength() / 2;
+    if (cx - hw < -12 || cx + hw > W + 6) t.style.display = 'none';
+  });
   // --- playhead
   TL.playhead = g.append('line').attr('y1', 12).attr('y2', H - 20).attr('stroke', cssv('--ink')).attr('stroke-width', 1.5).style('display', 'none');
   const hover = g.append('line').attr('y1', 12).attr('y2', H - 20).attr('stroke', cssv('--ink-3')).attr('stroke-dasharray', '2 2').style('display', 'none').attr('pointer-events', 'none');
@@ -202,8 +207,9 @@ function Calendar() {
   const st = getState();
   const y0 = new Date(ctx.day0 * DAY).getUTCFullYear(), y1 = new Date(ctx.day1 * DAY).getUTCFullYear();
   const years = d3.range(y0, y1 + 1);
-  const blockH = 7 * cs + 22;
-  const H = years.length * blockH + 4;
+  // each year: its label (14 px), 7 rows of cells, the month letters (14 px), then a gap
+  const blockH = 7 * cs + 38;
+  const H = years.length * blockH;
   const nz = [...tot].filter(v => v > 0).sort((a, b) => a - b);
   const q = d3.scaleSequentialQuantile(inkRamp()).domain(nz.map(v => v / 1000));
   const col = v => nz.length ? q(v) : cssv('--ink');
@@ -214,8 +220,8 @@ function Calendar() {
   years.forEach((yr, yi) => {
     const jan1 = Date.UTC(yr, 0, 1) / DAY, dec31 = Date.UTC(yr, 11, 31) / DAY;
     const off = (jan1 + 3) % 7; // monday-based weekday of Jan 1
-    const top = yi * blockH + 16;
-    labels.push(<text key={'y' + yr} className="cal-year" x="0" y={yi * blockH + 11}>{yr}</text>);
+    const top = yi * blockH + 18;
+    labels.push(<text key={'y' + yr} className="cal-year" x="0" y={yi * blockH + 12}>{yr}</text>);
     ['M', '', 'W', '', 'F', '', 'S'].forEach((l, i) => l && labels.push(<text key={`d${yr}${i}`} x="18" y={top + i * cs + cs * 0.8} textAnchor="end" fontSize="9.5" fill={ink3}>{l}</text>));
     for (let m = 0; m < 12; m++) {
       const wk = Math.floor((Date.UTC(yr, m, 1) / DAY - jan1 + off) / 7);

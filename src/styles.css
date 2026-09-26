@@ -188,7 +188,7 @@ svg text{font-family:var(--font)}
 .speed output{min-width:92px;font-size:12px}
 .time-body{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(300px,1fr);min-height:0}
 #timeline{position:relative;padding:4px 8px 0 14px;min-width:0}
-#timeline svg{display:block;width:100%}
+#timeline svg{display:block;width:100%;overflow:visible}
 #calendar{border-left:1px solid var(--rule-2);padding:6px 12px 6px;max-height:212px;overflow:auto;scrollbar-width:thin}
 #calendar svg{display:block}
 .cal-year{font-size:12px;font-weight:650;fill:var(--ink-2)}

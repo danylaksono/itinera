@@ -360,9 +360,12 @@ Semantic Location History), export, the layer toggles, mobile layout.
    and one that would overlap a placed label is hidden. Up to 10 places are labelled.
 6. **Cube stays.** Improved: wider columns, and trips drawn fainter when the span is long
    (`tripAlpha`, down to 0.28; the caption says so). A "stays only" toggle is still an option.
-7. **Calendar with many years.** A ten-year export shows about 3 cramped years. The year
-   label overlaps the month axis of the year above, and the last block is clipped.
-8. **Timeline axis.** The first tick label is clipped (for example "017").
+7. **Calendar with many years.** Fixed (Sep 2026): each year block has its own label band
+   (`blockH = 7 * cs + 38`), so the year no longer overlaps the months above and the last block
+   is not clipped. The panel opens at the latest year and scrolls; about two years fit. A way to
+   jump to a year (for example, from the timeline axis) could help with ten-year files.
+8. **Timeline axis.** Fixed: the svg may overflow into the panel's padding, and a tick label that
+   would still not fit is hidden, not clipped ("2017" shows in full, a clipped "Ma" is hidden).
 9. **Cube at world scale.** With ten years and two continents, local trips collapse to dots.
    Consider a default floor of the home area, or a log-time axis.
 10. **Progressive reveal in playback** looks as if nothing changes when the routes repeat.

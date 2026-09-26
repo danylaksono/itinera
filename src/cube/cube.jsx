@@ -79,6 +79,7 @@ export function createCube(el, lblBox, setCaption) {
     // The sphere is loose for a flat box: project the 8 corners and move closer until they fill
     // about 85% of the view (room for the time labels on the left).
     const dir = offset.clone().normalize(), p = new THREE.Vector3();
+    const fill = camera.aspect < 1.1 ? 0.72 : 0.85; // a narrow panel needs more room for the time labels
     let d = distance;
     for (let it = 0; it < 4; it++) {
       camera.position.copy(target).addScaledVector(dir, d);
@@ -89,7 +90,7 @@ export function createCube(el, lblBox, setCaption) {
         m = Math.max(m, Math.abs(p.x), Math.abs(p.y));
       }
       if (!(m > 0)) break;
-      d = clamp(d * m / 0.85, controls.minDistance, controls.maxDistance);
+      d = clamp(d * m / fill, controls.minDistance, controls.maxDistance);
     }
     camera.position.copy(target).addScaledVector(dir, d);
     controls.update();

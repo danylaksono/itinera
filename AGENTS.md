@@ -379,7 +379,8 @@ in `data_sample/`, which is git-ignored personal data: test with it only in loca
 never commit, publish or quote it. Dark mode has been checked in screenshots.
 
 Work that is not tested yet: other real export files (Takeout zip, iPhone JSON, the older
-Semantic Location History), export, the layer toggles, mobile layout.
+Semantic Location History), export, the layer toggles, and a real phone (the mobile layout has
+only been checked in headless Chromium, see item 14).
 
 ## 9. Known issues and next tasks (in priority order)
 
@@ -426,7 +427,12 @@ Semantic Location History), export, the layer toggles, mobile layout.
     them) have Google Maps and OpenStreetMap links, which send one coordinate pair on click. A
     place clicked on the map is added to the list and scrolled into view. Automatic names would
     still need a geocoder and a new host.
-14. Mobile layout (narrow screens) is not checked. The CSS has a breakpoint that stacks the views.
+14. **Mobile layout.** Checked (Sep 2026) at 390 × 844 (phone) and 820 × 1180 (tablet) in headless
+    Chromium with touch, no page scrolls sideways. In the 980 px breakpoint: the legend sits under
+    the views, not over them; split view stacks the map (52vh) over the second view (70vh); the
+    Layers popover spans the tool bar; and the cube fits a narrow panel more loosely
+    (`fitCamera()`, `fill`), so the time labels stay on screen. Not checked on a real phone yet
+    (touch dragging of the brushes and the cube, and iOS Safari).
 15. **Brushing a ten-year export** recomputes all views on each brush frame: about 150 ms per
     step in headless Chromium, of which `compute()` is 40–100 ms. Check it on a real GPU first. If
     it lags, compute only the cheap views while the brush moves and the rest on `end`, or memoise

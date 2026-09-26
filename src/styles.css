@@ -221,14 +221,26 @@ svg text{font-family:var(--font)}
 
 @media (max-width: 980px){
   #app{height:auto;display:block}
+  /* narrow screens: the legend goes under the views instead of over them */
+  .legend{position:static;max-width:none;border-width:1px 0 0;border-radius:0;backdrop-filter:none;background:var(--panel-2)}
+  .stage-body.split~.legend{max-width:none}
+  /* split: map and second view one above the other, each with room to work */
+  .stage{height:auto}
+  .stage-body{height:62vh;flex:none}
+  .stage-body.split{height:auto;grid-template-rows:52vh 70vh}
+  /* the Layers popover spans the tool bar, so it never runs off the screen */
+  .stage-tools{position:relative}
+  .layers{position:static}
+  .layers-pop{left:10px;right:10px;min-width:0}
+  .layers-pop .note{max-width:none}
   .bar{flex-wrap:wrap}
   .sources{order:3;flex-basis:100%}
   .kpis{grid-template-columns:repeat(3,minmax(0,1fr))}
   .kpi:nth-child(4){border-left:0}
   .kpi:nth-child(n+4){border-top:1px solid var(--rule-2)}
   .work{grid-template-columns:1fr}
-  .stage{height:68vh;border-right:0}
-  .stage-body.split{grid-template-columns:1fr;grid-template-rows:1fr 1fr}
+  .stage{border-right:0}
+  .stage-body.split{grid-template-columns:1fr}
   .stage-body.split #cube,.stage-body.split #marey{border-left:0;border-top:1px solid var(--rule-2)}
   .marey-cap,.cube-cap{flex-direction:column;gap:6px}
   .side{overflow:visible}

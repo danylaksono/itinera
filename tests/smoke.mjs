@@ -44,6 +44,25 @@ for (let i = 1; i <= 10; i++) await pg.mouse.move(box.x + box.w * (0.5 + i * 0.0
 await pg.mouse.up(); await pg.waitForTimeout(800);
 r.brushFilter = await pg.evaluate('window.__itinera.store.filter.t0 != null && !!document.querySelector(".chip")');
 await pg.keyboard.press('Escape'); await pg.waitForTimeout(500);
+// the place timetable: Home and Work rows, trips drawn, and a real drag over the hours sets the hours filter only
+await pg.click('#viewSeg button[data-v=marey]'); await pg.waitForTimeout(1500);
+r.marey = await pg.evaluate(() => {
+  const rows = [...document.querySelectorAll('#marey .mrow')].map(e => e.dataset.k);
+  const d = window.__itinera.mareyData('days', 17);
+  return { rows: rows.length, home: rows[0] === 'home', work: rows.includes('work'), trips: d.segs.filter(s => s.kind === 't').length, runs: d.segs.filter(s => s.loop && s.item.src === window.__itinera.store.sources.find(x => x.name === 'Running watch').id).length };
+});
+const mb = await pg.evaluate(() => { const o = document.querySelector('#marey .overlay').getBoundingClientRect(); return { x: o.x, y: o.y, w: o.width, h: o.height }; });
+await pg.mouse.move(mb.x + mb.w * (7 / 24) + 3, mb.y + mb.h / 2); await pg.mouse.down();
+for (let i = 1; i <= 8; i++) await pg.mouse.move(mb.x + mb.w * ((7 + i * 0.24) / 24), mb.y + mb.h / 2);
+await pg.mouse.up(); await pg.waitForTimeout(800);
+r.mareyBrush = await pg.evaluate(() => { const f = window.__itinera.store.filter; return f.hours ? [...f.hours].sort((a, b) => a - b).join(',') : null; });
+r.mareyBrushOk = r.mareyBrush === '7,8' && await pg.evaluate('window.__itinera.store.filter.dows === null && !!document.querySelector("#marey .brush .selection").getAttribute("width")');
+await pg.keyboard.press('Escape'); await pg.waitForTimeout(500);
+// selecting a row filters to that place but keeps every row (the chart ignores its own place filter for rows)
+await pg.click('#marey .mrow[data-k=work]'); await pg.waitForTimeout(1500);
+r.mareyPlace = await pg.evaluate(() => ({ place: window.__itinera.store.filter.place != null, rows: document.querySelectorAll('#marey .mrow').length }));
+await pg.keyboard.press('Escape'); await pg.waitForTimeout(500);
+await pg.click('#viewSeg button[data-v=map]'); await pg.waitForTimeout(1000);
 // a Takeout-style .zip through the real file input: the zip reader works under the policy
 const zip = new JSZip();
 const t0 = Date.UTC(2025, 5, 1, 7);
@@ -61,7 +80,8 @@ for (const l of logs) console.log(l);
 const blocked = await pg.evaluate("fetch('https://example.com/').then(() => false, () => true)");
 console.log('request to another site blocked:', blocked);
 const ok = !errs.length && r.home === 'Home' && r.work === 'Work' && r.kpi.countries === 2 && r.places === 30
-  && r.sources.length === 3 && r.cubeFloorOk && r.cubeDrawn && r.mapViewKept && r.landDrawn && r.trailsRendered && r.modeFilter && r.escapeClears && r.brushFilter && r.zipOk && blocked
+  && r.sources.length === 3 && r.cubeFloorOk && r.cubeDrawn && r.mapViewKept && r.landDrawn && r.trailsRendered && r.modeFilter && r.escapeClears && r.brushFilter && r.zipOk
+  && r.marey.home && r.marey.work && r.marey.trips > 1000 && r.marey.runs > 0 && r.mareyBrushOk && r.mareyPlace.place && r.mareyPlace.rows > 5 && blocked
   && r.together.includes('98%')
   // one person: phone trips (9,328 km) + watch runs (553 km); the work phone's copies are not added
   && Math.abs(r.kpi.dist / 1000 - 9881) < 100 && r.kpiText.slice(0, 3).every(t => t !== '0');

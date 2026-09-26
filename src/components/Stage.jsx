@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { useStore, getState, setState, subscribe } from '../store.js';
+import { useStore, getState, setState, subscribe, showing } from '../store.js';
+import { fmtKm, fmtDur } from '../lib/util.js';
+import { selectPlace } from '../actions.js';
+import { createMarey, LABEL_W } from '../marey/marey.jsx';
 import { MODES, cssv, inkOf, modeColor, hourStops } from '../lib/colors.js';
 import { visibleSources } from '../lib/analytics.js';
 import { createMap, fitAll, fitHome, onMapMove, setView } from '../map/mapView.jsx';
@@ -13,21 +16,22 @@ const LAYERS = [
 ];
 
 export default function Stage() {
-  const view = useStore(s => s.view), colorBy = useStore(s => s.colorBy), toast = useStore(s => s.toast);
+  const view = useStore(s => s.view), second = useStore(s => s.second), colorBy = useStore(s => s.colorBy), toast = useStore(s => s.toast);
   const setColor = v => setState({ colorBy: v });
   return (
     <section className="stage" aria-label="Map">
       <div className="stage-tools">
-        <Seg id="viewSeg" label="View" value={view} onChange={setView} options={[['map', 'Map'], ['split', 'Split'], ['cube', 'Space-time cube']]} />
+        <Seg id="viewSeg" label="View" value={view} onChange={setView} options={[['map', 'Map'], ['split', 'Split'], ['cube', 'Space-time cube'], ['marey', 'Place timetable']]} />
         <Seg id="colorSeg" label="Colour trips by" value={colorBy} onChange={setColor} options={[['device', 'Device'], ['mode', 'Travel mode'], ['hour', 'Time of day']]} />
         <Layers />
         <span className="sp"></span>
         <button className="btn" id="fitHome" title="Zoom to the area where you spend most time" onClick={() => fitHome(true)}>Home area</button>
         <button className="btn" id="fitAll" title="Zoom to all data" onClick={() => fitAll(true)}>All data</button>
       </div>
-      <div className={'stage-body' + (view === 'split' ? ' split' : view === 'cube' ? ' cube' : '')} id="stageBody">
+      <div className={`stage-body ${view} s-${second}`} id="stageBody">
         <MapHost />
         <CubeHost />
+        <MareyHost />
       </div>
       <Legend />
       <div className="toast" id="toast" hidden={!toast}>{toast?.msg}</div>
@@ -70,16 +74,16 @@ function CubeHost() {
   useEffect(() => {
     let cube = null, prev = getState();
     const show = () => {
-      if (getState().view === 'map') { cube?.show(false); return; }
+      if (!showing(getState(), 'cube')) { cube?.show(false); return; }
       if (!cube) cube = createCube(ref.current, lbl.current, setCap);
       if (!cube) return;
       cube.show(true);
       cube.setClock(getClock());
     };
-    if (prev.view !== 'map') show();
+    if (showing(prev, 'cube')) show();
     const unsub = subscribe(() => {
       const st = getState(), p = prev; prev = st;
-      if (st.view !== p.view) { requestAnimationFrame(show); return; }
+      if (st.view !== p.view || st.second !== p.second) { requestAnimationFrame(show); return; }
       if (cube && (st.res !== p.res || st.ctx !== p.ctx || st.colorBy !== p.colorBy || st.dark !== p.dark || st.labels !== p.labels || st.sources !== p.sources)) cube.schedule();
     });
     const unmove = onMapMove(() => cube?.schedule());
@@ -93,6 +97,68 @@ function CubeHost() {
           : cap && <><b>Space-time cube.</b> Time goes up, from {cap.from} at the floor to {cap.to} at the top. The floor is the {cap.split ? 'map view on the left' : 'last map view'}. Columns are stays, lines are trips ({cap.nTrips.toLocaleString('en-GB')} shown). Drag to turn, scroll to zoom, double-click to reset.</>}
       </div>
       <div ref={lbl} style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}></div>
+    </div>
+  );
+}
+
+/* The place timetable is made the first time it is shown, then follows the store and the clock.
+   Row labels and the caption are React; the chart itself is src/marey/marey.jsx. */
+function MareyHost() {
+  const plot = useRef(null);
+  const [meta, setMeta] = useState(null);
+  const layout = useStore(s => s.mareyLayout), hl = useStore(s => s.hlPlace), sel = useStore(s => s.filter.place);
+  useEffect(() => {
+    let m = null, prev = getState();
+    const show = () => {
+      if (!showing(getState(), 'marey')) { m?.show(false); return; }
+      if (!m) m = createMarey(plot.current, setMeta);
+      m.show(true);
+      m.setClock(getClock());
+    };
+    if (showing(prev, 'marey')) show();
+    const unsub = subscribe(() => {
+      const st = getState(), p = prev; prev = st;
+      if (st.view !== p.view || st.second !== p.second) { requestAnimationFrame(show); return; }
+      if (m && st !== p) m.update(st, p);
+    });
+    const unclock = onClock(t => m?.setClock(t));
+    return () => { unsub(); unclock(); m?.destroy(); };
+  }, []);
+  const st = getState();
+  const homeInferred = st.ctx?.homes.some(h => !h.labelled);
+  const hover = i => { if (getState().hlPlace !== i) setState({ hlPlace: i }); };
+  return (
+    <div id="marey">
+      <div className="marey-cap" id="mareyCap">
+        <p>{meta && <><b>Place timetable.</b> {meta.layout === 'days'
+          ? <>{meta.days.toLocaleString('en-GB')} days stacked on one 24-hour axis, so routines show as dense bundles.</>
+          : <>The selected period in real time.{meta.rangeDays > 21 ? ' Select a shorter period on the timeline to read single days.' : ''}</>}
+          {' '}Rows are places, ordered by distance from home. Bars are stays, lines are trips{meta.hasLoops ? ', arches leave and return to the same row' : ''}{meta.hasOpen ? ', dashed lines end away from a known place' : ''}.
+          {meta.layout === 'days' ? ' Drag across the hours to select them.' : ''}</>}</p>
+        <Seg id="mareySeg" label="Timetable layout" value={layout} onChange={v => setState({ mareyLayout: v })} options={[['days', 'Stack days'], ['calendar', 'Along the calendar']]} />
+      </div>
+      <div className="marey-plot" ref={plot}>
+        <div className="marey-rows" style={{ width: LABEL_W - 10 }}>
+          {meta?.rows.map(r => {
+            const clickable = r.place >= 0;
+            const p = clickable ? st.ctx?.places[r.place] : null;
+            const note = r.key === 'home' ? (homeInferred ? 'inferred' : '') : r.key === 'work' ? (p?.inferredRole ? 'inferred' : '') : r.key === 'other' ? (r.count ? `${r.count.toLocaleString('en-GB')} places` : '') : isFinite(r.dist) ? `${fmtKm(r.dist)} km` : '';
+            return (
+              <div key={r.key} className={'mrow' + (clickable ? '' : ' plain') + (clickable && sel === r.place ? ' sel' : '') + (clickable && hl === r.place ? ' hl' : '')}
+                style={{ top: r.y - Math.min(r.h, 30) / 2, height: Math.min(r.h, 30) }} data-k={r.key}
+                {...(clickable ? {
+                  tabIndex: 0, role: 'button', 'aria-pressed': sel === r.place,
+                  title: `${r.label}: ${fmtDur(r.dur)} in the selection. Select to see only trips to and from this place.`,
+                  onMouseEnter: () => hover(r.place), onMouseLeave: () => hover(null),
+                  onClick: () => selectPlace(r.place, true),
+                  onKeyDown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectPlace(r.place, true); } }
+                } : { title: 'Places without a row of their own, and trip ends away from a known place' })}>
+                <span className="ml">{r.label}</span>{note && <span className="mn">{note}</span>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

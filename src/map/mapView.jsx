@@ -28,12 +28,13 @@ export function restoreView() {
   if (!ready || !M.bounds || !map.getContainer().clientWidth) return;
   M.quiet = true; map.fitBounds(M.bounds, { duration: 0 }); M.quiet = false;
 }
-/* switch map / split / cube, keeping the chosen map view */
+/* switch map / split / cube / place timetable, keeping the chosen map view.
+   Split shows the map beside the secondary view opened last. */
 export function setView(v) {
   viewBounds();
   // queued before the state change, so the map resizes before the cube (which reads its bounds) builds
   requestAnimationFrame(() => { if (map) { map.resize(); restoreView(); } });
-  setState({ view: v });
+  setState(v === 'cube' || v === 'marey' ? { view: v, second: v } : { view: v });
 }
 
 function graticule() {

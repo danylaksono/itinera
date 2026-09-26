@@ -8,7 +8,7 @@ import { MIN, DAY, RAD, clamp, fmtDay, fmtDur, fmtLocal } from '../lib/util.js';
 import { cssv, modeColor, hourColor, trackColor } from '../lib/colors.js';
 import { WORLD } from '../lib/geo.js';
 import { activeSources, visibleSources, srcById, playRange, offNear, headAt } from '../lib/analytics.js';
-import { getState } from '../store.js';
+import { getState, showing } from '../store.js';
 import { getMap, mapReady, viewBounds, boundsOf } from '../map/mapView.jsx';
 import { showTip, hideTip } from '../tip.jsx';
 
@@ -32,7 +32,7 @@ export function createCube(el, lblBox, setCaption) {
   let geo = null; // { toX, toZ, toY, X, Z, H, a, b, stays, inst }
   let clockGrp = null, heads = [];
   const labels = [];
-  const visible = () => getState().view !== 'map';
+  const visible = () => showing(getState(), 'cube');
 
   const ro = new ResizeObserver(() => { if (visible()) { resize(); render(); } });
   ro.observe(el);

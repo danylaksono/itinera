@@ -96,10 +96,26 @@ svg text{font-family:var(--font)}
 .stage-tools .sp{flex:1}
 .stage-body{position:relative;flex:1;min-height:0;display:grid;grid-template-columns:1fr}
 .stage-body.split{grid-template-columns:1fr 1fr}
-#map,#cube{position:relative;min-height:0;min-width:0}
+#map,#cube,#marey{position:relative;min-height:0;min-width:0}
 #cube{display:none;background:var(--panel-2);border-left:1px solid var(--rule-2)}
-.stage-body.split #cube,.stage-body.cube #cube{display:block}
-.stage-body.cube #map{display:none}
+.stage-body.split.s-cube #cube,.stage-body.cube #cube{display:block}
+.stage-body.cube #map,.stage-body.marey #map{display:none}
+/* place timetable: caption strip above the plot, so it never covers the lines */
+#marey{display:none;flex-direction:column;background:var(--panel-2);border-left:1px solid var(--rule-2)}
+.stage-body.split.s-marey #marey,.stage-body.marey #marey{display:flex}
+.marey-cap{display:flex;align-items:flex-start;gap:12px;padding:9px 12px 7px;border-bottom:1px solid var(--rule-2);color:var(--ink-2);font-size:12px}
+.marey-cap p{margin:0;flex:1;max-width:92ch;min-height:2.9em}
+.marey-cap b{color:var(--ink);font-weight:650}
+.marey-plot{position:relative;flex:1;min-height:0;overflow:hidden}
+.marey-plot canvas,.marey-svg{position:absolute;left:0;top:0}
+.marey-svg{z-index:1}
+.marey-rows{position:absolute;left:0;top:0;bottom:0;z-index:2;pointer-events:none}
+.mrow{position:absolute;left:4px;right:0;display:flex;align-items:center;gap:6px;padding:0 6px 0 8px;border-radius:3px;pointer-events:auto;cursor:pointer;min-width:0}
+.mrow.plain{cursor:default;color:var(--ink-3)}
+.mrow:hover,.mrow.hl{background:var(--sel)}
+.mrow.sel{background:var(--sel);box-shadow:inset 2px 0 0 var(--sel-line)}
+.mrow .ml{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mrow .mn{color:var(--ink-3);font-size:11px;white-space:nowrap}
 #cube canvas{display:block;position:absolute;inset:0;width:100%!important;height:100%!important}
 .cube-cap{position:absolute;left:12px;top:10px;right:12px;color:var(--ink-2);font-size:12px;pointer-events:none;max-width:44ch}
 .cube-cap b{color:var(--ink);font-weight:650}
@@ -112,6 +128,9 @@ svg text{font-family:var(--font)}
 .legend span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
 .legend i{display:inline-block;width:14px;height:3px;border-radius:2px}
 .legend .ramp{width:120px;height:6px;border-radius:3px}
+/* the timetable fills the stage: its legend sits under it, not over the bottom rows */
+.stage-body.split~.legend{max-width:calc(50% - 22px)}
+.stage-body.marey~.legend{position:static;max-width:none;border-width:1px 0 0;border-radius:0;backdrop-filter:none;background:var(--panel-2)}
 .toast{position:absolute;right:12px;bottom:12px;z-index:5;max-width:320px;background:var(--ink);color:var(--paper);padding:8px 11px;border-radius:4px;font-size:12px}
 .toast[hidden]{display:none}
 .tip{position:fixed;z-index:30;pointer-events:none;background:var(--ink);color:var(--paper);padding:6px 9px;border-radius:4px;font-size:12px;line-height:1.35;max-width:260px;display:none}
@@ -201,7 +220,8 @@ svg text{font-family:var(--font)}
   .work{grid-template-columns:1fr}
   .stage{height:68vh;border-right:0}
   .stage-body.split{grid-template-columns:1fr;grid-template-rows:1fr 1fr}
-  .stage-body.split #cube{border-left:0;border-top:1px solid var(--rule-2)}
+  .stage-body.split #cube,.stage-body.split #marey{border-left:0;border-top:1px solid var(--rule-2)}
+  .marey-cap{flex-direction:column;gap:6px}
   .side{overflow:visible}
   .time-body{grid-template-columns:1fr}
   #calendar{border-left:0;border-top:1px solid var(--rule-2);max-height:none}

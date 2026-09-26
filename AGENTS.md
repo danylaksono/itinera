@@ -77,10 +77,12 @@ src/lib/geo.js        loadGeo() (world outline and gazetteer chunks), countryAt(
 src/lib/colors.js     MODES, INKS_L/INKS_D, HOUR_STOPS, isDark, cssv, inkOf, modeColor, hourColor, trackColor
 src/lib/analytics.js  buildContext() (places, roles), markDuplicates(), passes(), compute(), togetherness(), headAt()
 src/lib/sample.js     makeSample(): synthetic Lisbon year, emitted in three real export formats
+src/lib/marey.js      mareyData(): rows and segments for the place timetable (pure)
 src/map/mapView.jsx   MapLibre map (imperative): layers, tooltips, framing, the map side of playback
 src/cube/cube.jsx     space-time cube (three.js, imperative)
-src/components/       React views: App, Landing (+ hero), Workspace (top bar, KPIs), Stage (map/cube
-                      hosts, layers, legend), Side (filters, rhythm, modes, places), Time (player,
+src/marey/marey.jsx   place timetable, a Marey chart (canvas and D3, imperative)
+src/components/       React views: App, Landing (+ hero), Workspace (top bar, KPIs), Stage (map, cube and
+                      timetable hosts, layers, legend), Side (filters, rhythm, modes, places), Time (player,
                       timeline, calendar), Seg
 tests/common.mjs      Playwright helpers: static server for dist/, software WebGL flags, sample loading
 tests/smoke.mjs       loads the sample, checks key numbers and the policy, exits 1 on failure
@@ -226,6 +228,35 @@ called the first time the cube is shown and returns `{build, schedule, setClock,
 It must fail gracefully when there is no WebGL. three.js is pinned at 0.147 because r152 and
 later change colour management, which shifts every colour.
 
+### Place timetable (`src/lib/marey.js`, `src/marey/marey.jsx`)
+
+A Marey chart (after Marey's 1885 Paris–Lyon train timetable). The rows are places. Stays are bars on
+their row, and trips are straight lines from the start row to the end row, so the slope shows the
+speed between places. Round trips (the same row at both ends) are small arches that point away
+from home. A dashed line has an end with no known place.
+
+- Rows: the Home and Work *role rows* first (a stay at the home of that time, `homeAt()`, goes on
+  Home, so moving house keeps one row; in months with no known home, any place in `ctx.homeSet`
+  counts), then the places with most time, fitted to the panel height. They are ordered by their
+  median distance from the home of the time of each stay. The rest share one "Other places" row.
+  A trip end with no stay (`from`/`to` = −1, for example a watch run) snaps to the nearest place
+  within 300 m before it falls back to "Other places".
+- Layout `state.mareyLayout`: `'days'` stacks every day on one 24-hour axis (segments are split
+  at local midnight, each at low alpha, so routines add up to dense bundles). `'calendar'` keeps real
+  time over the selected range. Both use local time (each record's own offset, and the offset at
+  the arrival time for the arrival end).
+- Filters: `'days'` ignores its own hours filter (`passes(st, it, 'rhythm')` plus the weekday
+  filter by hand), and its brush sets `filter.hours` (snapped to whole hours) with `from = 'marey'`.
+  `update()` skips the rebuild for its own brush, because a rebuild mid-drag would cut the drag off.
+  `'calendar'` uses every filter and has no brush (the timeline sets its range).
+- Drawing: a base canvas, with **one stroke per segment**. One path per colour would be composited
+  once, and overlapping days would not add up. An overlay canvas holds playback (the current day
+  drawn in full up to the clock, and a "now" line). An SVG holds the axis and brush. Row labels and
+  the caption are React (`MareyHost` in `Stage.jsx`, through `setMeta`), so file text is escaped.
+  Colours are cached per build (`cssv()` is slow).
+- Split view shows the map beside the secondary view opened last (`state.second`, `'cube'` or
+  `'marey'`). Use `showing(st, v)` from `store.js`, never `view !== 'map'`.
+
 ### Sample data (`src/lib/sample.js`)
 
 A seeded, synthetic year in Lisbon from 6 Jan 2025 to 27 Feb 2026. It has commutes,
@@ -271,7 +302,8 @@ the parsers. Expected result: 3 sources, 30 places, Home and Work found, 2 count
 - d3 inside React: use `selectAll` to reach an element that d3 made (brush parts, axes).
   `selection.select` copies the parent's datum onto the child.
 - Keep the DOM ids and class names that the CSS and the tests use (`#sampleBtn`, `#app`, `#busy`,
-  `.kpi .n`, `#together`, `#viewSeg button[data-v=…]`, `.mode-row[data-k=…]`, `#fileInput`).
+  `.kpi .n`, `#together`, `#viewSeg button[data-v=…]`, `.mode-row[data-k=…]`, `#fileInput`, `#marey`,
+  `#mareySeg button[data-v=…]`, `.mrow[data-k=…]`).
 - After each change: `npm test`. After a visual change: also `npm run shots`, and look at the images.
 
 ## 8. Status
@@ -290,7 +322,10 @@ places and roles, KPIs with sparklines, timeline with brush and coverage rows, c
 (quantile colours), weekly rhythm with drag selection, mode bars, place list with weekly
 sparklines and details, filter chips, sources bar (recolour, rename, hide, join, remove),
 device co-location, combined mode, map layers and tooltips, playback (clock, playhead, current
-cells, tails, heads), split view, and the cube in its first version.
+cells, tails, heads), split view, and the cube in its first version. The place timetable (Sep 2026):
+both layouts, the hours brush (the smoke test drags it), tooltips, playback, split view, both
+themes (`7_timetable`, `8_timetable_week`, `9_split_timetable` in the shots). It was also probed with
+the ten-year file: `mareyData()` takes well under 100 ms, and drawing and hover are fine.
 
 Tested with a real ten-year Android `Timeline.json` from the owner, before and after the rewrite
 (loads without errors, outline map at world scale, brushing works). It is
@@ -338,6 +373,39 @@ Semantic Location History), export, the layer toggles, mobile layout.
     the calendar cells and set only their opacity.
 16. The workspace chunk and `actions.js` are about 510 kB and 860 kB before gzip (MapLibre,
     three.js, Turf). The cube could be split further with a dynamic `import()` of `cube.jsx`.
+17. **Sports logs as a second device** (a watch or Strava GPX next to a phone timeline). This is in
+    scope, and the sample models it ("Running watch"). Four small fixes make it correct:
+    - Group the GPX files of one import into one source. Now each file becomes its own device
+      (`parseGPX()`), so a bulk export of 600 activities shows 600 devices.
+    - Map Strava's type names in `modeGroup()`: "Ride", "VirtualRide" and "EBikeRide" fall
+      through to `other` (and so do "Swim", "Ski" and "Row"). Old exports use number codes
+      (1 = ride, 9 = run).
+    - GPX times in UTC (`Z`) have no offset, so `finalize()` uses the browser's time zone. A run
+      abroad then lands in the wrong local hour. Borrow the offset from an overlapping source
+      that has one. The sample's `runs.gpx` uses `Z` but stays in Lisbon, so the tests miss this.
+    - `markDuplicates()` ranks devices by days covered, so a carried phone outranks the watch and
+      the watch run is marked `dup`. Prefer the denser track where they overlap. Combined mode
+      has the same issue: its 20 s merge can keep the phone point, because GPX points have no
+      accuracy (−1).
+
+    A full sports mode is **out of scope for now** (owner's decision, Sep 2026). That covers
+    FIT and TCX files, elevation, heart rate, cadence and power, sport KPIs, a sport palette,
+    and trip-only sources. The present stay detection turns a track session into a "stay" and
+    café stops into places. `inferMode()` classes a run over about 9.4 km/h as cycling and a
+    road ride over about 21.6 km/h as road. `thinPath()` keeps at most 400 vertices per trip.
+    Revisit these only if a sports mode is taken on.
+18. **Sources with no UTC offsets use the browser's time zone.** `Records.json` (and GPX in `Z`)
+    has no offsets, so `finalize()` falls back to `browserOff()`. On a machine that is not in the
+    data's time zone, that device's local hours shift. On a UTC+7 machine the sample's Work phone
+    commutes at about 00:00 in the rhythm grid and the timetable. `tests/shots.mjs` pins
+    `timezoneId: 'Europe/Lisbon'` for this reason; the smoke test does not depend on it. Fix: borrow
+    the offset from an overlapping source that has one (the phone's Timeline.json), then fall back
+    to the browser. This is the same fix as the GPX part of item 17.
+19. **Place timetable at ten years.** Stacked days work, but many rows saturate and the trips
+    become a haze. Brushing a period on the timeline helps. Consider an alpha from the density
+    (for example, render the counts into a buffer and map them through a ramp), or a default that
+    stacks only the latest year. The rows could also offer "order by travel adjacency" as an
+    option.
 
 ## 10. Publishing
 

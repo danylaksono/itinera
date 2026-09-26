@@ -9,6 +9,8 @@ let state = {
   screen: 'landing',          // 'landing' | 'app'
   sources: [], merged: null, mode: 'separate', hidden: new Set(),
   colorBy: 'device', view: 'map', modeMetric: 'dist',
+  second: 'cube',             // the view beside the map in split: 'cube' | 'marey' (the last one opened)
+  mareyLayout: 'days',        // place timetable: 'days' (stacked on 24 h) | 'calendar'
   layers: { trails: true, heat: true, places: true, flows: false, ellipse: false, streets: false },
   filter: NO_FILTER,
   ctx: null, res: null,
@@ -30,6 +32,8 @@ export function setState(patch) {
   for (const f of subs) f();
 }
 export function subscribe(f) { subs.add(f); return () => subs.delete(f); }
+/* is the secondary view v ('cube' or 'marey') on screen, alone or in split? */
+export const showing = (st, v) => st.view === v || (st.view === 'split' && st.second === v);
 export const useStore = sel => useSyncExternalStore(subscribe, () => sel(state));
 
 /* The analysis code (actions.js and the libraries it needs) loads on demand. If that load fails

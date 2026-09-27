@@ -111,9 +111,10 @@ publish directory (`dist`). Connect the repository and deploy. For a one-off
 deploy, drag the `dist` folder onto Netlify Drop instead.
 
 The basemap is the built-in outline map by default, so the page makes no requests after it
-loads. Under *Layers › Basemap* you can choose an online one: street tiles from CARTO
-(`*.basemaps.cartocdn.com`), or streets and labels, or a detailed map with shops and places, from
-OpenFreeMap (`tiles.openfreemap.org`). Those requests show that server which map area you are
+loads. Under *Layers › Basemap* you can choose an online one: the standard map from
+OpenStreetMap (`tile.openstreetmap.org`, under its [tile usage policy](https://operations.osmfoundation.org/policies/tiles/)),
+or streets and labels, or a detailed map with shops and places, from OpenFreeMap
+(`tiles.openfreemap.org`). Those requests show that server which map area you are
 viewing, but none of your location data. They help you recognise a place yourself, without
 reverse geocoding.
 

@@ -38,12 +38,13 @@ rules, the page is blocked:
   `index.html` gets an inline `<script>`. Do not use `eval` or `new Function`.
 - Styles: the bundled CSS, inline styles (React `style` props and D3 attributes need
   `'unsafe-inline'`), and Google Fonts (`fonts.googleapis.com`, files from `fonts.gstatic.com`).
-- The only allowed connections are the optional online basemaps: CARTO (`*.basemaps.cartocdn.com`)
-  and OpenFreeMap (`tiles.openfreemap.org`, which serves the style, vector tiles, fonts and
-  sprites). They are off by default. The only `fetch` is the OpenFreeMap style JSON, when that
-  basemap is chosen. There are no remote images or trackers. The Google Maps and OpenStreetMap
-  links in a place's details are plain links (a new tab, on click), not requests from the page. The world outline and the town
-  list are bundled as JS chunks (so no `connect-src 'self'` is needed).
+- The only allowed connections are the optional online basemaps: OpenStreetMap
+  (`tile.openstreetmap.org`, raster tiles under its tile usage policy) and OpenFreeMap
+  (`tiles.openfreemap.org`, which serves the style, vector tiles, fonts and sprites). They are off
+  by default. The only `fetch` is the OpenFreeMap style JSON, when that basemap is chosen. There
+  are no remote images or trackers. The Google Maps and OpenStreetMap links in a place's details
+  are plain links (a new tab, on click), not requests from the page. The world outline and the
+  town list are bundled as JS chunks (so no `connect-src 'self'` is needed).
 - Workers: `worker-src 'self' blob:`. MapLibre starts its worker from a blob, and our file reader
   (`src/fileWorker.js`) is a bundled file of the site.
 - If a new feature really needs another host, add it to `CSP` in `vite.config.js` and say so
@@ -227,7 +228,7 @@ change, behind the busy overlay, and only if they changed. During playback the s
 back (the reveal needs them). On a ten-year file it takes about 1–1.5 s (700 of about 3,000 pairs).
 The effect is strongest where trips repeat between the same places.
 
-Basemap (`state.basemap`, Layers › Basemap): `'outline'` (built in, offline), `'carto'` (raster),
+Basemap (`state.basemap`, Layers › Basemap): `'outline'` (built in, offline), `'osm'` (OpenStreetMap raster tiles, inverted with raster paint in the dark theme),
 `'ofm'` (OpenFreeMap Positron, or Dark in the dark theme) or `'ofm-poi'` (OpenFreeMap Liberty, with
 shops and places). `setBasemap()` fetches the OpenFreeMap style JSON and adds its sources and
 layers into our map with a `bm-` prefix: the layers go under `heat`, and the symbol (label) layers go

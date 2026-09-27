@@ -120,7 +120,7 @@ export function createMap(container) {
     if (getClock() != null) drawFrame(getClock(), true);
   });
   m.on('error', e => {
-    if (e?.sourceId?.startsWith('bm-') || /cartocdn|openfreemap/.test(e?.error?.message || '')) basemapFailed();
+    if (e?.sourceId?.startsWith('bm-') || /tile.openstreetmap|openfreemap/.test(e?.error?.message || '')) basemapFailed();
   });
 
   /* apply what changed in the store since the last call */
@@ -368,7 +368,7 @@ function restyleMap(st) {
   map.setPaintProperty('flows', 'line-color', cssv('--ink'));
   map.setPaintProperty('heads', 'circle-stroke-color', cssv('--paper'));
   restyleTails(st);
-  if (st.basemap !== 'outline' && st.basemap !== 'ofm-poi') setBasemap(st); // CARTO and OpenFreeMap streets have light and dark styles
+  if (st.basemap !== 'outline' && st.basemap !== 'ofm-poi') setBasemap(st); // OpenStreetMap (inverted) and OpenFreeMap streets follow the theme
 }
 
 /* ---------- optional online basemaps (off by default; see the README) ----------
@@ -377,7 +377,7 @@ function restyleMap(st) {
    which map area is viewed; nothing else leaves the page. */
 export const BASEMAPS = [
   ['outline', 'Outline map (offline)'],
-  ['carto', 'Streets, CARTO'],
+  ['osm', 'Standard map, OpenStreetMap'],
   ['ofm', 'Streets and labels, OpenFreeMap'],
   ['ofm-poi', 'Detailed, with shops and places, OpenFreeMap']
 ];
@@ -392,11 +392,15 @@ async function setBasemap(st) {
   clearTimeout(M.basemapTimer);
   clearBasemap();
   if (st.basemap === 'outline') return;
-  if (st.basemap === 'carto') {
-    const style = isDark() ? 'dark_all' : 'light_all';
-    map.addSource('bm-carto', { type: 'raster', tileSize: 256, maxzoom: 19, attribution: '© OpenStreetMap contributors © CARTO',
-      tiles: ['a', 'b', 'c'].map(s => `https://${s}.basemaps.cartocdn.com/${style}/{z}/{x}/{y}.png`) });
-    map.addLayer({ id: 'bm-carto', type: 'raster', source: 'bm-carto', paint: { 'raster-opacity': 0.9 } }, 'heat');
+  if (st.basemap === 'osm') {
+    // OpenStreetMap's standard tiles: no key, but its tile usage policy applies (attribution, light
+    // interactive use). There is no dark version, so in the dark theme the tiles are inverted and
+    // their hues turned back, which keeps water blue-ish and roads light on dark.
+    map.addSource('bm-osm', { type: 'raster', tileSize: 256, maxzoom: 19, attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors',
+      tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'] });
+    map.addLayer({ id: 'bm-osm', type: 'raster', source: 'bm-osm', paint: isDark()
+      ? { 'raster-opacity': 0.85, 'raster-brightness-min': 0.92, 'raster-brightness-max': 0.08, 'raster-hue-rotate': 180, 'raster-saturation': -0.55, 'raster-contrast': -0.15 }
+      : { 'raster-opacity': 0.85, 'raster-saturation': -0.35 } }, 'heat');
   } else {
     // a vector style: Positron or Dark for streets, Liberty for shops and places
     const name = st.basemap === 'ofm-poi' ? 'liberty' : isDark() ? 'dark' : 'positron';

@@ -60,7 +60,7 @@ function Layers() {
           <legend>Basemap</legend>
           {BASEMAPS.map(([k, l]) => <label key={k} className="chk"><input type="radio" name="basemap" data-b={k} checked={basemap === k} onChange={() => setState({ basemap: k })} /> {l}</label>)}
         </fieldset>
-        <div className="note">The outline map is built in and works offline, but shows coastlines only at country scale. The other basemaps load map tiles from CARTO or OpenFreeMap: that server sees which area of the map you view, but none of your location data. Zoom in with the detailed basemap to see the shops and places around one of yours.</div>
+        <div className="note">The outline map is built in and works offline, but shows coastlines only at country scale. The other basemaps load map tiles from OpenStreetMap or OpenFreeMap: that server sees which area of the map you view, but none of your location data. Zoom in with the detailed basemap to see the shops and places around one of yours.</div>
       </div>
     </div>
   );

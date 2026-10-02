@@ -9,7 +9,8 @@ the others filter to match.
 upload. Files are read with the browser's File API. When you close the tab, the data is
 gone. The page carries a Content-Security-Policy, so the browser itself blocks any attempt
 to send data elsewhere. Scripts load only from the site itself. The only other requests it
-allows are the font and the optional online basemaps (see [Deploy](#deploy)).
+allows are the font, the optional online basemaps, and the optional "Ask" feature (see
+[Deploy](#deploy)).
 
 ## What you can do
 
@@ -121,6 +122,17 @@ reverse geocoding.
 A place's details also have *Open in Google Maps* and *OpenStreetMap* links. They open a new tab
 at that place's coordinates, and nothing is sent until you click one.
 
+**"Ask about your data"** is off until you turn it on. Typing a question ("where did I go for
+lunch on 17 September 2023") sends only the question text and today's date to a cloud LLM you
+choose - Anthropic (`api.anthropic.com`) or OpenAI (`api.openai.com`) - using an API key you
+supply and pay for yourself. The LLM never sees your location data: it returns a structured
+filter (a date range, hours, weekdays, travel modes, a place phrase), which Itinera then matches
+against your data locally, the same way any other filter works. The key is stored only in this
+browser's `localStorage`, is sent with every request in a header, and is visible in your
+browser's network tools like any client-side key - it is not a server-side secret. Turn the
+feature on only if you're comfortable with that, and only your questions (never your timeline)
+leave the browser.
+
 ## Tests
 
 ```bash
@@ -137,6 +149,8 @@ It also checks that:
 - the cube draws, and the cube floor and the map view survive a change of view;
 - trails render, which proves the map worker runs under the policy;
 - selecting a travel mode filters the other views, and Escape clears it;
+- "Ask about your data" is off until a key is set, and turns a question into a filter (tested
+  against a mocked provider response, which also proves the CSP allows that host);
 - a `.zip` loads through the file input;
 - a request to another site is blocked.
 

@@ -6,6 +6,8 @@ import { finalize, combinedRaw, joinRaws, offsetGuide } from './lib/build.js';
 import { loadGeo } from './lib/geo.js';
 import { makeSample } from './lib/sample.js';
 import { buildContext, compute, markDuplicates, togetherness, srcById, defaultLabel, saveName } from './lib/analytics.js';
+import { askLLM, loadApiKey, DEFAULT_MODEL } from './lib/llm.js';
+import { toFilterPatch, localTodayISO } from './lib/llmQuery.js';
 import { getState, setState, NO_FILTER, toast } from './store.js';
 import { stopPlay, togglePlay } from './playback.js';
 import { fitAll, flyTo } from './map/mapView.jsx';
@@ -233,6 +235,19 @@ export function renamePlace(key, value) {
   saveName(p.key, v); p.custom = v || null;
   p.label = defaultLabel(p);
   setState({ labels: st.labels + 1 });
+}
+
+/* ---------- ask: an opt-in, BYOK natural-language filter (see lib/llm.js, lib/llmQuery.js) ---------- */
+let askToken = 0;
+export async function runAskQuery(question) {
+  const st = getState(), { provider, model } = st.llm;
+  const apiKey = loadApiKey(provider);
+  if (!apiKey) { toast('Add an API key first.'); return null; }
+  const token = ++askToken;
+  const r = await askLLM(provider, apiKey, model || DEFAULT_MODEL[provider], question, localTodayISO());
+  if (token !== askToken) return null; // a newer question superseded this one
+  if (!r.ok) { toast(r.message, 9000); return null; }
+  return toFilterPatch(getState(), r.data);
 }
 
 /* ---------- export ---------- */

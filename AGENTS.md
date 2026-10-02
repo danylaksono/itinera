@@ -40,11 +40,16 @@ rules, the page is blocked:
   `'unsafe-inline'`), and Google Fonts (`fonts.googleapis.com`, files from `fonts.gstatic.com`).
 - The only allowed connections are the optional online basemaps: OpenStreetMap
   (`tile.openstreetmap.org`, raster tiles under its tile usage policy) and OpenFreeMap
-  (`tiles.openfreemap.org`, which serves the style, vector tiles, fonts and sprites). They are off
-  by default. The only `fetch` is the OpenFreeMap style JSON, when that basemap is chosen. There
-  are no remote images or trackers. The Google Maps and OpenStreetMap links in a place's details
-  are plain links (a new tab, on click), not requests from the page. The world outline and the
-  town list are bundled as JS chunks (so no `connect-src 'self'` is needed).
+  (`tiles.openfreemap.org`, which serves the style, vector tiles, fonts and sprites); and the
+  optional "Ask about your data" feature (`api.anthropic.com`, `api.openai.com`: see
+  `src/lib/llm.js`), a BYOK natural-language-to-filter translator. All of these are off by
+  default. The only `fetch`es are the OpenFreeMap style JSON, when that basemap is chosen, and
+  the Ask request, when a key is set and a question is asked - and in the Ask case, the request
+  body is only the question text and today's date, never location data (see `src/lib/llmQuery.js`
+  for exactly what is and isn't sent). There are no remote images or trackers. The Google Maps and
+  OpenStreetMap links in a place's details are plain links (a new tab, on click), not requests
+  from the page. The world outline and the town list are bundled as JS chunks (so no
+  `connect-src 'self'` is needed).
 - Workers: `worker-src 'self' blob:`. MapLibre starts its worker from a blob, and our file reader
   (`src/fileWorker.js`) is a bundled file of the site.
 - If a new feature really needs another host, add it to `CSP` in `vite.config.js` and say so
@@ -86,12 +91,14 @@ src/lib/analytics.js  buildContext() (places, roles), markDuplicates(), passes()
 src/lib/sample.js     makeSample(): synthetic Lisbon year, emitted in three real export formats
 src/lib/marey.js      mareyData(): rows and segments for the place timetable (pure)
 src/lib/bundle.js     fdeb() (force-directed edge bundling) and bundleTrips(): the map's bundled view (pure)
+src/lib/llmQuery.js   the "Ask" feature's schema, intent lookup, place matching, toFilterPatch() (pure)
+src/lib/llm.js        the "Ask" feature's provider calls (Anthropic, OpenAI) and API key storage
 src/map/mapView.jsx   MapLibre map (imperative): layers, tooltips, framing, the map side of playback
 src/cube/cube.jsx     space-time cube (three.js, imperative)
 src/marey/marey.jsx   place timetable, a Marey chart (canvas and D3, imperative)
 src/components/       React views: App, Landing (+ hero), Workspace (top bar, KPIs), Stage (map, cube and
-                      timetable hosts, layers, legend), Side (filters, rhythm, modes, places), Time (player,
-                      timeline, calendar), Seg
+                      timetable hosts, layers, legend), Side (Ask, filters, rhythm, modes, places), Ask
+                      (opt-in natural-language filter), Time (player, timeline, calendar), Seg
 tests/common.mjs      Playwright helpers: static server for dist/, software WebGL flags, sample loading
 tests/smoke.mjs       loads the sample, checks key numbers and the policy, exits 1 on failure
 tests/shots.mjs       screenshots of the main states into tests/out/
@@ -350,7 +357,8 @@ the parsers. Expected result: 3 sources, 30 places, Home and Work found, 2 count
   `selection.select` copies the parent's datum onto the child.
 - Keep the DOM ids and class names that the CSS and the tests use (`#sampleBtn`, `#app`, `#busy`,
   `.kpi .n`, `#together`, `#viewSeg button[data-v=…]`, `.mode-row[data-k=…]`, `#fileInput`, `#marey`,
-  `#mareySeg button[data-v=…]`, `.mrow[data-k=…]`).
+  `#mareySeg button[data-v=…]`, `.mrow[data-k=…]`, `#askInput`, `#askSubmitBtn`, `#askSettingsBtn`,
+  `#askProviderSel`, `#askKeyInput`, `#askSaveBtn`, `#askDraft`, `#askApplyBtn`, `#askSummary`).
 - After each change: `npm test`. After a visual change: also `npm run shots`, and look at the images.
 
 ## 8. Status
@@ -471,6 +479,32 @@ only been checked in headless Chromium, see item 14).
 20. **Bundled trips.** Possible next steps: move `bundleTrips()` into a worker (it blocks for about
     1 s on years of data); a strength setting (step and compatibility threshold); and bundling the
     "Flows between places" layer with the same code.
+21. **"Ask about your data"** (Sep 2026, new, untested against a live key). An opt-in, BYOK
+    natural-language filter: `src/lib/llmQuery.js` has the schema, the closed intent/weekday/mode
+    vocabularies, place matching and `toFilterPatch()` (pure, unit-testable without a key);
+    `src/lib/llm.js` calls Anthropic or OpenAI directly from the browser and normalises both to
+    `{ok, data}` or `{ok, reason, message}`; `src/components/Ask.jsx` is the settings gate and the
+    question box, rendered above `Filters()` in `Side.jsx`. Known gaps to verify with a real key
+    before relying on this:
+    - Anthropic needs `anthropic-dangerous-direct-browser-access: true` to answer a browser
+      request at all; this is by design (BYOK, not a server-side secret) and is disclosed in the
+      settings note, but has not been checked against a live response shape.
+    - OpenAI's CORS behaviour for a direct browser call to `api.openai.com` is unverified; the
+      code assumes a generic `fetch` failure there means a CORS block and says so, but this is a
+      guess until checked live.
+    - The exact model IDs in `DEFAULT_MODEL` (`llm.js`) are a placeholder default, editable in the
+      settings panel; pin real, current model IDs before shipping.
+    - "Summer"/"winter" are not part of the schema (deliberately: they are hemisphere-dependent,
+      so the LLM is not asked to resolve them); a season question falls back to `unsupported`.
+    - After "Show this", `summarizeResult()` (`llmQuery.js`) writes one plain-English line under the
+      question box (`#askSummary`), built locally from `st.res` and never sent anywhere. It goes
+      stale (hidden) as soon as `state.filter` changes elsewhere. Because the views match a stay
+      by its *start* hour, a stay that began before the hour window (an office day at lunch)
+      shows nothing in them; `ongoingStays()` finds those and the line says so ("no stays or trips
+      started in this window, but you were at Work ..."). The line and the views can therefore
+      differ on purpose: the line answers the question, the views show what began in the window.
+    - `tests/smoke.mjs` covers the wiring with `page.route()` mocks for Anthropic (not OpenAI,
+      not a real key). A mocked request only arrives if the CSP `connect-src` host is right.
 
 ## 10. Publishing
 

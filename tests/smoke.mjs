@@ -85,6 +85,38 @@ r.mareyPlace = await pg.evaluate(() => ({ place: window.__itinera.store.filter.p
 r.placeLinks = await pg.evaluate(() => [...document.querySelectorAll('.place[aria-expanded="true"] .place-links a')].filter(a => a.target === '_blank' && /noopener/.test(a.rel)).length === 2 && window.__itinera.store.basemap === 'outline');
 await pg.keyboard.press('Escape'); await pg.waitForTimeout(500);
 await pg.click('#viewSeg button[data-v=map]'); await pg.waitForTimeout(1000);
+
+// "Ask about your data" (opt-in, BYOK natural-language filter): the pure translation needs no key or network
+r.askPure = await pg.evaluate(() => {
+  const A = window.__itinera.ask;
+  const bad = A.validateFilterShape({ date_from: null, date_to: null, weekdays: null, intent: null, hour_from: null, hour_to: null, modes: null, place_query: null, unsupported: null, extra: 1 });
+  const good = A.validateFilterShape({ date_from: '2025-09-17', date_to: null, weekdays: null, intent: 'lunch', hour_from: null, hour_to: null, modes: null, place_query: 'work', unsupported: null });
+  const p = good.ok ? A.toFilterPatch(good.data) : null;
+  return { rejectsUnknownField: !bad.ok, hours: p && [...p.patch.hours].sort((a, b) => a - b).join(','), inferred: p?.chips.find(c => c.key === 'hours')?.inferred, place: p?.patch.place, work: window.__itinera.store.ctx.work };
+});
+r.askPureOk = r.askPure.rejectsUnknownField && r.askPure.hours === '11,12,13,14' && r.askPure.inferred === true && r.askPure.place === r.askPure.work;
+// off by default: no key stored yet, so a collapsed prompt shows instead of the question box
+r.askGated = await pg.evaluate(() => !!document.querySelector('#askSettingsBtn') && !document.querySelector('#askInput') && !document.querySelector('#askKeyInput'));
+// a mocked provider proves the wiring end to end. It also proves the CSP connect-src host is
+// right: a CSP-blocked request never reaches this route, so a wrong host times out here instead.
+await pg.route('https://api.anthropic.com/**', route => route.fulfill({
+  contentType: 'application/json',
+  body: JSON.stringify({ content: [{ type: 'tool_use', input: { date_from: '2025-09-17', date_to: null, weekdays: null, intent: 'lunch', hour_from: null, hour_to: null, modes: null, place_query: null, unsupported: null } }] })
+}));
+await pg.click('#askSettingsBtn');
+await pg.fill('#askKeyInput', 'test-key');
+await pg.click('#askSaveBtn');
+await pg.fill('#askInput', 'where did I go for lunch on 17 September 2025');
+await pg.click('#askSubmitBtn');
+await waitFor(pg, 'document.querySelectorAll("#askDraft .chip").length > 0', 10000);
+r.askDraft = await pg.evaluate(() => [...document.querySelectorAll('#askDraft .chip')].map(c => c.textContent));
+await pg.click('#askApplyBtn'); await pg.waitForTimeout(500);
+r.askApplied = await pg.evaluate(() => { const f = window.__itinera.store.filter; return f.t0 != null && f.hours != null && !!document.querySelector('.filters .chip'); });
+await waitFor(pg, '!!document.querySelector("#askSummary")', 10000);
+r.askSummary = await pg.evaluate('document.querySelector("#askSummary").textContent');
+await pg.keyboard.press('Escape'); await pg.waitForTimeout(500);
+await pg.unroute('https://api.anthropic.com/**');
+
 // a Takeout-style .zip through the real file input: the zip reader works under the policy
 const zip = new JSZip();
 const t0 = Date.UTC(2025, 5, 1, 7);
@@ -107,7 +139,8 @@ const ok = !errs.length && r.home === 'Home' && r.work === 'Work' && r.kpi.count
   && r.marey.home && r.marey.work && r.marey.trips > 1000 && r.marey.runs > 0 && r.mareyBrushOk && r.mareyPlace.place && r.mareyPlace.rows > 5 && r.placeLinks && blocked
   && r.together.includes('98%') && r.offsets.length === 2 && r.offsets.every(o => o.lisbon && !o.browser && o.nearby > 0)
   // one person: phone trips (9,328 km) + watch runs (553 km); the work phone's copies are not added
-  && Math.abs(r.kpi.dist / 1000 - 9881) < 100 && r.kpiText.slice(0, 3).every(t => t !== '0');
+  && Math.abs(r.kpi.dist / 1000 - 9881) < 100 && r.kpiText.slice(0, 3).every(t => t !== '0')
+  && r.askPureOk && r.askGated && r.askDraft.length >= 2 && r.askApplied && r.askSummary.startsWith('17 Sep 2025, 11:00') && /no stays or trips started in this window, but you were at Work \(/.test(r.askSummary);
 await b.close(); site.close();
 console.log('SMOKE', ok ? 'PASS' : 'FAIL');
 process.exit(ok ? 0 : 1);

@@ -15,6 +15,7 @@ let state = {
   layers: { trails: true, heat: true, places: true, flows: false, ellipse: false },
   bundle: false, bundleInfo: null, // bundled trips on the map (schematic); bundleInfo = { pairs, bundled, loops }
   basemap: 'outline',         // 'outline' (offline) | 'osm' | 'ofm' | 'ofm-poi' (online, opt-in: see mapView.jsx)
+  llm: { provider: 'anthropic', model: '' }, // "Ask" natural-language filter (online, opt-in, BYOK: see lib/llm.js)
   filter: NO_FILTER,
   ctx: null, res: null,
   from: 'all',                // which view caused the latest compute (the timeline keeps its brush)

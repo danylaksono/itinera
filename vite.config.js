@@ -24,8 +24,9 @@ function gazetteer() {
 }
 
 /* The Content-Security-Policy that makes the privacy promise hold: scripts only from this site,
-   no connections except the optional online basemaps (OpenStreetMap, OpenFreeMap). Built pages only (the dev server needs
-   inline scripts for hot reload). */
+   no connections except the optional online basemaps (OpenStreetMap, OpenFreeMap) and the optional
+   "Ask" feature (Anthropic, OpenAI: see lib/llm.js) - both off by default and opt-in. Built pages
+   only (the dev server needs inline scripts for hot reload). */
 const CSP = [
   "default-src 'none'",
   "script-src 'self'",
@@ -33,7 +34,8 @@ const CSP = [
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   'font-src https://fonts.gstatic.com',
   "img-src 'self' data: blob: https://tile.openstreetmap.org https://tiles.openfreemap.org",
-  'connect-src https://tile.openstreetmap.org https://tiles.openfreemap.org', // online basemaps, only when one is chosen
+  // online basemaps and the "Ask" feature, both opt-in and off by default
+  'connect-src https://tile.openstreetmap.org https://tiles.openfreemap.org https://api.anthropic.com https://api.openai.com',
   "base-uri 'none'", "form-action 'none'"
 ].join('; ');
 function csp() {

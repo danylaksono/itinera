@@ -9,10 +9,12 @@ import { onClock } from '../playback.js';
 import { showTip, hideTip } from '../tip.jsx';
 import { useWidth, reducedMotion } from '../hooks.js';
 import Seg from './Seg.jsx';
+import Ask from './Ask.jsx';
 
 export default function Side() {
   return (
     <aside className="side">
+      <Ask />
       <Filters />
       <Rhythm />
       <Modes />

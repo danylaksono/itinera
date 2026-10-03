@@ -25,7 +25,7 @@ function gazetteer() {
 
 /* The Content-Security-Policy that makes the privacy promise hold: scripts only from this site,
    no connections except the optional online basemaps (OpenStreetMap, OpenFreeMap) and the optional
-   "Ask" feature (Anthropic, OpenAI: see lib/llm.js) - both off by default and opt-in. Built pages
+   "Ask" feature (Anthropic, OpenAI, OpenRouter: see lib/llm.js) - both off by default and opt-in. Built pages
    only (the dev server needs inline scripts for hot reload). */
 const CSP = [
   "default-src 'none'",
@@ -35,7 +35,7 @@ const CSP = [
   'font-src https://fonts.gstatic.com',
   "img-src 'self' data: blob: https://tile.openstreetmap.org https://tiles.openfreemap.org",
   // online basemaps and the "Ask" feature, both opt-in and off by default
-  'connect-src https://tile.openstreetmap.org https://tiles.openfreemap.org https://api.anthropic.com https://api.openai.com',
+  'connect-src https://tile.openstreetmap.org https://tiles.openfreemap.org https://api.anthropic.com https://api.openai.com https://openrouter.ai',
   "base-uri 'none'", "form-action 'none'"
 ].join('; ');
 function csp() {

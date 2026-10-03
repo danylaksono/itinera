@@ -116,6 +116,20 @@ await waitFor(pg, '!!document.querySelector("#askSummary")', 10000);
 r.askSummary = await pg.evaluate('document.querySelector("#askSummary").textContent');
 await pg.keyboard.press('Escape'); await pg.waitForTimeout(500);
 await pg.unroute('https://api.anthropic.com/**');
+// OpenRouter: an OpenAI-format answer delivered as a forced tool call (a second host the CSP must allow)
+await pg.route('https://openrouter.ai/**', route => route.fulfill({
+  contentType: 'application/json',
+  body: JSON.stringify({ choices: [{ message: { tool_calls: [{ function: { name: 'set_filter', arguments: JSON.stringify({ date_from: '2025-09-17', date_to: null, weekdays: null, intent: null, hour_from: 9, hour_to: 11, modes: ['walk'], place_query: null, unsupported: null }) } }] } }] })
+}));
+await pg.click('#askSettingsBtn');
+await pg.selectOption('#askProviderSel', 'openrouter');
+await pg.fill('#askKeyInput', 'test-key-or');
+await pg.click('#askSaveBtn');
+await pg.fill('#askInput', 'walks on 17 September 2025 between 9 and 11');
+await pg.click('#askSubmitBtn');
+await waitFor(pg, 'document.querySelectorAll("#askDraft .chip").length > 0', 10000);
+r.askOpenRouter = await pg.evaluate(() => [...document.querySelectorAll('#askDraft .chip')].map(c => c.textContent));
+await pg.unroute('https://openrouter.ai/**');
 
 // a Takeout-style .zip through the real file input: the zip reader works under the policy
 const zip = new JSZip();
@@ -140,7 +154,7 @@ const ok = !errs.length && r.home === 'Home' && r.work === 'Work' && r.kpi.count
   && r.together.includes('98%') && r.offsets.length === 2 && r.offsets.every(o => o.lisbon && !o.browser && o.nearby > 0)
   // one person: phone trips (9,328 km) + watch runs (553 km); the work phone's copies are not added
   && Math.abs(r.kpi.dist / 1000 - 9881) < 100 && r.kpiText.slice(0, 3).every(t => t !== '0')
-  && r.askPureOk && r.askGated && r.askDraft.length >= 2 && r.askApplied && r.askSummary.startsWith('17 Sep 2025, 11:00') && /no stays or trips started in this window, but you were at Work \(/.test(r.askSummary);
+  && r.askPureOk && r.askGated && r.askDraft.length >= 2 && r.askApplied && r.askOpenRouter.length === 3 && r.askSummary.startsWith('17 Sep 2025, 11:00') && /no stays or trips started in this window, but you were at Work \(/.test(r.askSummary);
 await b.close(); site.close();
 console.log('SMOKE', ok ? 'PASS' : 'FAIL');
 process.exit(ok ? 0 : 1);

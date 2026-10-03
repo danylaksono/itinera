@@ -41,7 +41,7 @@ rules, the page is blocked:
 - The only allowed connections are the optional online basemaps: OpenStreetMap
   (`tile.openstreetmap.org`, raster tiles under its tile usage policy) and OpenFreeMap
   (`tiles.openfreemap.org`, which serves the style, vector tiles, fonts and sprites); and the
-  optional "Ask about your data" feature (`api.anthropic.com`, `api.openai.com`: see
+  optional "Ask about your data" feature (`api.anthropic.com`, `api.openai.com`, `openrouter.ai`: see
   `src/lib/llm.js`), a BYOK natural-language-to-filter translator. All of these are off by
   default. The only `fetch`es are the OpenFreeMap style JSON, when that basemap is chosen, and
   the Ask request, when a key is set and a question is asked - and in the Ask case, the request
@@ -492,6 +492,13 @@ only been checked in headless Chromium, see item 14).
     - OpenAI's CORS behaviour for a direct browser call to `api.openai.com` is unverified; the
       code assumes a generic `fetch` failure there means a CORS block and says so, but this is a
       guess until checked live.
+    - OpenRouter (`openrouter.ai`) uses the OpenAI-format code path in `llm.js` (`CONFIG` holds
+      each provider's label, default model and URL; a new OpenAI-compatible host is one entry plus
+      its origin in the CSP). It forces a function call (`structured: 'tool'`) because strict
+      `json_schema` is not supported by every model it fronts, and falls back to JSON in the message
+      content. Tested only against a mock. Unverified: browser CORS for a direct call, and whether
+      models behind it accept the schema's nullable `type: [..., 'null']` arrays (some, such as
+      Gemini, may not). The strict validator turns a bad answer into a clear error, not a guess.
     - The exact model IDs in `DEFAULT_MODEL` (`llm.js`) are a placeholder default, editable in the
       settings panel; pin real, current model IDs before shipping.
     - "Summer"/"winter" are not part of the schema (deliberately: they are hemisphere-dependent,

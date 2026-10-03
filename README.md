@@ -124,8 +124,8 @@ at that place's coordinates, and nothing is sent until you click one.
 
 **"Ask about your data"** is off until you turn it on. Typing a question ("where did I go for
 lunch on 17 September 2023") sends only the question text and today's date to a cloud LLM you
-choose - Anthropic (`api.anthropic.com`) or OpenAI (`api.openai.com`) - using an API key you
-supply and pay for yourself. The LLM never sees your location data: it returns a structured
+choose - Anthropic (`api.anthropic.com`), OpenAI (`api.openai.com`) or OpenRouter
+(`openrouter.ai`, which fronts many models) - using an API key you supply and pay for yourself. The LLM never sees your location data: it returns a structured
 filter (a date range, hours, weekdays, travel modes, a place phrase), which Itinera then matches
 against your data locally, the same way any other filter works. The key is stored only in this
 browser's `localStorage`, is sent with every request in a header, and is visible in your
